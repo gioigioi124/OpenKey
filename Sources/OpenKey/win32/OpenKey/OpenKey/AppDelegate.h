@@ -40,6 +40,7 @@ public: //event
 	void onToggleCheckSpelling();
 	void onToggleUseSmartSwitchKey();
 	void onToggleUseMacro();
+	void onToggleAutoSwitchCodeTable();
 
 	void onMacroTable();
 	void onConvertTool();

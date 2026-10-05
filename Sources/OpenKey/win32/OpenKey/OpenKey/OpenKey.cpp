@@ -108,6 +108,7 @@ void OpenKeyInit() {
 	APP_GET_DATA(vCheckNewVersion, 0);
 	APP_GET_DATA(vRememberCode, 1);
 	APP_GET_DATA(vOtherLanguage, 1);
+	APP_GET_DATA(vAutoSwitchCodeTable, 1);
 	APP_GET_DATA(vTempOffOpenKey, 0);
 	APP_GET_DATA(vFixChromiumBrowser, 0);
 
@@ -542,6 +543,11 @@ LRESULT CALLBACK keyboardHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 				_hasJustUsedHotKey = true;
 				_keycode = 0;
 				return -1;
+			} else if (_keycode == VK_F12) {
+				AppDelegate::getInstance()->onToggleAutoSwitchCodeTable();
+				_hasJustUsedHotKey = true;
+				_keycode = 0;
+				return -1;
 			}
 		}
 
@@ -704,20 +710,23 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 	if (exe.compare("explorer.exe") == 0) //dont apply with windows explorer
 		return;
 
-	// 1. Check process-based rules first (e.g. s.exe -> TCVN3, chrome.exe/zalo.exe -> Unicode)
-	int ruleCode = ProcessRuleHelper::getCodeTableForProcess(exe);
-	if (ruleCode != -1) {
-		if (vCodeTable != ruleCode) {
-			AppDelegate::getInstance()->onTableCode(ruleCode);
-			SystemTrayHelper::updateData();
+	// 1. Process recognition rule (only active when not locked)
+	if (vAutoSwitchCodeTable) {
+		int ruleCode = ProcessRuleHelper::getCodeTableForProcess(exe);
+		if (ruleCode != -1) {
+			if (vCodeTable != ruleCode) {
+				AppDelegate::getInstance()->onTableCode(ruleCode);
+				SystemTrayHelper::updateData();
+			}
 		}
+		// If ruleCode == -1, do NOT change vCodeTable! Retain current encoding without fallback!
 	}
 
-	// 2. Smart switch key & Remember code
-	if (vUseSmartSwitchKey || vRememberCode) {
+	// 2. Smart switch key (for Vietnamese/English language toggle only, NO code table fallback)
+	if (vUseSmartSwitchKey) {
 		_languageTemp = getAppInputMethodStatus(exe, vLanguage | (vCodeTable << 1));
 		vTempOffEngine(false);
-		if (vUseSmartSwitchKey && (_languageTemp & 0x01) != vLanguage) {
+		if ((_languageTemp & 0x01) != vLanguage) {
 			if (_languageTemp != -1) {
 				vLanguage = _languageTemp;
 				AppDelegate::getInstance()->onInputMethodChangedFromHotKey();
@@ -725,18 +734,9 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 				saveSmartSwitchKeyData();
 			}
 		}
-		startNewSession();
-		// If rule matched this app, rule takes precedence over remembered code table
-		if (ruleCode == -1 && vRememberCode && (_languageTemp >> 1) != vCodeTable) {
-			if (_languageTemp != -1) {
-				AppDelegate::getInstance()->onTableCode(_languageTemp >> 1);
-			} else {
-				saveSmartSwitchKeyData();
-			}
-		}
-	} else {
-		startNewSession();
 	}
+
+	startNewSession();
 
 	if (vSupportMetroApp && exe.compare("ApplicationFrameHost.exe") == 0) {//Metro App
 		SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);

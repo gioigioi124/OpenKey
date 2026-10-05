@@ -1,16 +1,20 @@
 # Tài liệu Kỹ thuật: Phím tắt Đổi Bảng mã & Nhận diện Tiến trình Tự động (OpenKey)
 
 ## 1. Giới thiệu tổng quan
-Tài liệu này ghi lại chi tiết quá trình phân tích, thiết kế, triển khai mã nguồn và phản biện kiểm tra cho 2 tính năng mới được phát triển trên bản fork của **OpenKey** (https://open-key.org/):
+Tài liệu này ghi lại chi tiết quá trình phân tích, thiết kế, triển khai mã nguồn và phản biện kiểm tra cho các tính năng mới được phát triển trên bản fork của **OpenKey** (https://open-key.org/):
 1. **Phím tắt chuyển đổi nhanh bảng mã (UniKey-like hotkeys)**:
    - `Ctrl + Shift + F1`: Chuyển sang bảng mã **Unicode** (`vCodeTable = 0`).
    - `Ctrl + Shift + F2`: Chuyển sang bảng mã **TCVN3 (ABC)** (`vCodeTable = 1`).
-   - Kèm thông báo Tooltip/Balloon ở khay hệ thống (System Tray) và âm báo nếu bật chế độ âm báo.
+   - Kèm thông báo Tooltip/Balloon ở khay hệ thống (System Tray) và âm báo (nếu bật tùy chọn âm báo).
 2. **Tự động nhận diện phần mềm đang hoạt động (Process-based Auto Encoding Switch)**:
    - Khi chuyển sang cửa sổ tiến trình `s.exe` $\rightarrow$ Tự động chuyển bảng mã về **TCVN3**.
-   - Khi chuyển sang cửa sổ tiến trình `chrome.exe` hoặc `zalo.exe` $\rightarrow$ Tự động chuyển bảng mã về **Unicode**.
-   - Hỗ trợ file cấu hình bên ngoài `process_rules.ini` để người dùng dễ dàng bổ sung ứng dụng khác mà không phải can thiệp code.
-3. **Bảo tồn giao diện gốc**:
+   - **Không tự động fallback về Unicode**: Các ứng dụng KHÔNG nằm trong danh sách quy tắc sẽ **giữ nguyên 100% bảng mã hiện tại** của người dùng, không tự ý nhảy về Unicode.
+   - Hỗ trợ file cấu hình bên ngoài `process_rules.ini` để người dùng dễ dàng bổ sung ứng dụng khác.
+3. **Cơ chế Khóa / Bật-Tắt Tự động chuyển bảng mã (Lock / Toggle Mechanism)**:
+   - **Menu khay hệ thống**: Bổ sung tùy chọn *"Tự động chuyển bảng mã theo ứng dụng"* có dấu tích chọn (checkmark) trực quan để bật hoặc khóa tính năng bất cứ lúc nào.
+   - **Phím tắt nhanh**: Nhấn `Ctrl + Shift + F12` để Bật hoặc Khóa nhanh tính năng này mọi lúc mọi nơi.
+   - **File cấu hình**: Có thể đặt `enabled = 1` hoặc `enabled = 0` trong `process_rules.ini`.
+4. **Bảo tồn giao diện gốc**:
    - 100% giữ nguyên giao diện, bố cục dialog và khay hệ thống nguyên bản của phần mềm OpenKey.
 
 ---
@@ -20,21 +24,29 @@ Tài liệu này ghi lại chi tiết quá trình phân tích, thiết kế, tri
 ### Agent 1: Kiến trúc sư & Lên kế hoạch (Architect & Planner)
 - **Nhiệm vụ**: Phân tích kiến trúc mã nguồn của OpenKey Win32, đề xuất giải pháp kỹ thuật, lập câu hỏi làm rõ các điểm mơ hồ với người dùng.
 - **Kết quả làm rõ từ người dùng**:
-  - *Cấu hình danh sách ứng dụng*: Mặc định có sẵn `s.exe` (TCVN3), `chrome.exe`/`zalo.exe` (Unicode), kèm hỗ trợ đọc file `process_rules.ini` bên ngoài.
+  - *Cấu hình danh sách ứng dụng*: Mặc định `s.exe` $\rightarrow$ TCVN3, kèm hỗ trợ đọc file `process_rules.ini` bên ngoài.
   - *Độ ưu tiên*: Tự động chuyển bảng mã khi kích hoạt cửa sổ; nếu người dùng ấn phím tắt thủ công trong ứng dụng đó thì vẫn cho phép đổi tạm thời cho phiên đó.
+  - *Không fallback*: Ứng dụng khác không có quy tắc thì giữ nguyên bảng mã đang dùng.
+  - *Cơ chế Khóa*: Cung cấp công tắc khóa để tắt tự động chuyển bảng mã khi cần.
   - *Phản hồi*: Hiển thị thông báo nhỏ (Tray notification / Balloon tooltip) ở góc màn hình khi đổi bảng mã.
 
 ### Agent 2: Kỹ sư Triển khai Mã nguồn (Software Engineer)
 - **Nhiệm vụ**: Trực tiếp viết code vào hệ thống mã nguồn OpenKey Win32.
 - **Các thành phần đã phát triển**:
-  1. `ProcessRuleHelper.h` & `ProcessRuleHelper.cpp`: Module quản lý danh sách quy tắc ánh xạ tiến trình $\rightarrow$ bảng mã, tự động sinh và nạp `process_rules.ini`, xử lý chuẩn hóa tên tiến trình không phân biệt hoa thường.
-  2. `SystemTrayHelper.h` & `SystemTrayHelper.cpp`: Bổ sung hàm `SystemTrayHelper::showNotification` gửi thông báo Balloon Notification qua Windows Shell Notification API (`Shell_NotifyIcon`).
-  3. `OpenKey.cpp`:
-     - Bổ sung bắt phím `Ctrl + Shift + F1` và `Ctrl + Shift + F2` trong hàm hook bàn phím `keyboardHookProcess`.
-     - Bổ sung cơ chế nhận diện foreground process và áp dụng bảng mã trong `winEventProcCallback`.
+  1. `ProcessRuleHelper.h` & `ProcessRuleHelper.cpp`: Module quản lý danh sách quy tắc ánh xạ tiến trình $\rightarrow$ bảng mã, tự động sinh và nạp `process_rules.ini`, xử lý chuẩn hóa tên tiến trình không phân biệt hoa thường, hỗ trợ tham số `enabled = 1/0`.
+  2. `SystemTrayHelper.h` & `SystemTrayHelper.cpp`:
+     - Bổ sung hàm `SystemTrayHelper::showNotification` gửi thông báo Balloon qua Windows Shell Notification API.
+     - Bổ sung mục menu `POPUP_AUTO_SWITCH_CODETABLE` ("Tự động chuyển bảng mã theo ứng dụng") kèm checkmark.
+  3. `AppDelegate.h` & `AppDelegate.cpp`:
+     - Bổ sung biến toàn cục `vAutoSwitchCodeTable` lưu cấu hình vào Registry.
+     - Triển khai hàm `onToggleAutoSwitchCodeTable()`.
+  4. `OpenKey.cpp`:
+     - Bổ sung bắt phím `Ctrl + Shift + F1` (Unicode), `Ctrl + Shift + F2` (TCVN3) và `Ctrl + Shift + F12` (Khóa/Mở khóa tự động).
+     - Bổ sung cơ chế nhận diện foreground process trong `winEventProcCallback`, loại bỏ việc ép fallback về Unicode đối với ứng dụng không có rule.
      - Khởi tạo quy tắc trong `OpenKeyInit()`.
-  4. `OpenKey.vcxproj` & `OpenKey.vcxproj.filters`: Cập nhật cấu hình build Visual Studio để tích hợp `ProcessRuleHelper`.
-  5. `process_rules.ini`: File cấu hình mẫu với các giá trị mặc định.
+  5. `OpenKey.vcxproj` & `OpenKey.vcxproj.filters`: Cập nhật cấu hình build Visual Studio để tích hợp `ProcessRuleHelper`.
+  6. `process_rules.ini`: File cấu hình mẫu với các giá trị mặc định.
+  7. `build.bat`: Kịch bản biên dịch tự động chuẩn UTF-8 (codepage 65001).
 
 ### Agent 3: Chuyên gia Phản biện, Kiểm thử & Lập tài liệu (Reviewer & QA)
 - **Nhiệm vụ**: Đánh giá kiến trúc, kiểm tra các ca biên (edge-cases), xác minh tính tương thích và lập tài liệu kỹ thuật hoàn chỉnh.
@@ -43,11 +55,11 @@ Tài liệu này ghi lại chi tiết quá trình phân tích, thiết kế, tri
 
 ## 3. Chi tiết triển khai mã nguồn (Implementation Details)
 
-### 3.1. Phím tắt `Ctrl + Shift + F1` & `Ctrl + Shift + F2`
+### 3.1. Phím tắt `Ctrl + Shift + F1`, `F2` & `F12`
 Vị trí: `keyboardHookProcess` trong [`OpenKey.cpp`](Sources/OpenKey/win32/OpenKey/OpenKey/OpenKey.cpp).
 
 ```cpp
-// Hotkeys: Ctrl + Shift + F1 (Unicode), Ctrl + Shift + F2 (TCVN3)
+// Hotkeys: Ctrl + Shift + F1 (Unicode), Ctrl + Shift + F2 (TCVN3), Ctrl + Shift + F12 (Khóa/Mở khóa)
 if ((_flag & MASK_CONTROL) && (_flag & MASK_SHIFT) && !(_flag & MASK_ALT) && !(_flag & MASK_WIN)) {
     if (_keycode == VK_F1) {
         AppDelegate::getInstance()->onTableCode(0);
@@ -58,7 +70,7 @@ if ((_flag & MASK_CONTROL) && (_flag & MASK_SHIFT) && !(_flag & MASK_ALT) && !(_
         }
         _hasJustUsedHotKey = true;
         _keycode = 0;
-        return -1; // Ngăn không cho phím F1 gửi tới ứng dụng đích
+        return -1;
     } else if (_keycode == VK_F2) {
         AppDelegate::getInstance()->onTableCode(1);
         SystemTrayHelper::updateData();
@@ -68,24 +80,19 @@ if ((_flag & MASK_CONTROL) && (_flag & MASK_SHIFT) && !(_flag & MASK_ALT) && !(_
         }
         _hasJustUsedHotKey = true;
         _keycode = 0;
-        return -1; // Ngăn không cho phím F2 gửi tới ứng dụng đích
+        return -1;
+    } else if (_keycode == VK_F12) {
+        AppDelegate::getInstance()->onToggleAutoSwitchCodeTable();
+        _hasJustUsedHotKey = true;
+        _keycode = 0;
+        return -1;
     }
 }
 ```
 
-**Cơ chế hoạt động**:
-- Khi nhấn tổ hợp phím, `onTableCode(code)` được gọi:
-  - Cập nhật biến `vCodeTable`.
-  - Lưu cấu hình vào Windows Registry (`APP_SET_DATA`).
-  - Làm mới hộp thoại điều khiển chính nếu đang mở (`mainDialog->fillData()`).
-- `SystemTrayHelper::updateData()`: Cập nhật dấu tích chọn (checkmark) trên menu chuột phải ở khay hệ thống.
-- `SystemTrayHelper::showNotification(...)`: Hiển thị balloon thông báo trực quan.
-- Gán `_hasJustUsedHotKey = true` để tránh nhầm lẫn với hotkey chuyển ngôn ngữ Ctrl+Shift thông thường.
-- Trả về `-1` để triệt tiêu sự kiện bàn phím, tránh việc ứng dụng đang dùng nhận được phím `F1` (thường mở Help).
-
 ---
 
-### 3.2. Tự động nhận diện ứng dụng (Process Recognition)
+### 3.2. Tự động nhận diện ứng dụng (Không fallback về Unicode)
 Vị trí: `winEventProcCallback` trong [`OpenKey.cpp`](Sources/OpenKey/win32/OpenKey/OpenKey/OpenKey.cpp).
 
 ```cpp
@@ -94,20 +101,23 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
     if (exe.compare("explorer.exe") == 0)
         return;
 
-    // 1. Kiểm tra quy tắc nhận diện ứng dụng
-    int ruleCode = ProcessRuleHelper::getCodeTableForProcess(exe);
-    if (ruleCode != -1) {
-        if (vCodeTable != ruleCode) {
-            AppDelegate::getInstance()->onTableCode(ruleCode);
-            SystemTrayHelper::updateData();
+    // 1. Kiểm tra quy tắc nhận diện ứng dụng (chỉ chạy khi không bị khóa)
+    if (vAutoSwitchCodeTable) {
+        int ruleCode = ProcessRuleHelper::getCodeTableForProcess(exe);
+        if (ruleCode != -1) {
+            if (vCodeTable != ruleCode) {
+                AppDelegate::getInstance()->onTableCode(ruleCode);
+                SystemTrayHelper::updateData();
+            }
         }
+        // Nếu ruleCode == -1: GIỮ NGUYÊN vCodeTable, KHÔNG fallback về Unicode!
     }
 
-    // 2. Chức năng nhớ bảng mã & ngôn ngữ (SmartSwitchKey)
-    if (vUseSmartSwitchKey || vRememberCode) {
+    // 2. Chức năng nhớ ngôn ngữ Anh/Việt (SmartSwitchKey)
+    if (vUseSmartSwitchKey) {
         _languageTemp = getAppInputMethodStatus(exe, vLanguage | (vCodeTable << 1));
         vTempOffEngine(false);
-        if (vUseSmartSwitchKey && (_languageTemp & 0x01) != vLanguage) {
+        if ((_languageTemp & 0x01) != vLanguage) {
             if (_languageTemp != -1) {
                 vLanguage = _languageTemp;
                 AppDelegate::getInstance()->onInputMethodChangedFromHotKey();
@@ -115,18 +125,9 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
                 saveSmartSwitchKeyData();
             }
         }
-        startNewSession();
-        // Nếu ứng dụng nằm trong danh sách quy tắc, quy tắc có độ ưu tiên cao hơn
-        if (ruleCode == -1 && vRememberCode && (_languageTemp >> 1) != vCodeTable) {
-            if (_languageTemp != -1) {
-                AppDelegate::getInstance()->onTableCode(_languageTemp >> 1);
-            } else {
-                saveSmartSwitchKeyData();
-            }
-        }
-    } else {
-        startNewSession();
     }
+
+    startNewSession();
     ...
 }
 ```
@@ -134,47 +135,41 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 ---
 
 ### 3.3. File cấu hình `process_rules.ini`
-File được tự động tìm kiếm hoặc khởi tạo cùng thư mục với `OpenKey.exe` (hoặc `OpenKey64.exe`):
 
 ```ini
 # ============================================================
 # OpenKey - Cấu hình tự động nhận diện tiến trình & bảng mã
-# Định dạng: [tên_tiến_trình] = [bảng_mã]
+#
+# Cài đặt khóa / bật tính năng:
+#   enabled = 1   (1: Bật tự động chuyển, 0: Khóa / Tắt)
+#
+# Định dạng quy tắc: [tên_tiến_trình] = [bảng_mã]
 # Bảng mã hỗ trợ:
 #   0 hoặc UNICODE          : Unicode dựng sẵn
 #   1 hoặc TCVN3            : TCVN3 (ABC)
 #   2 hoặc VNI              : VNI Windows
 #   3 hoặc UNICODE_COMPOUND : Unicode tổ hợp
 #   4 hoặc VN_LOCALE_1258   : Vietnamese locale CP 1258
+#
+# Lưu ý: Các phần mềm KHÔNG có trong danh sách sẽ GIỮ NGUYÊN
+# bảng mã hiện tại, KHÔNG tự động fallback về Unicode.
 # ============================================================
 
+enabled = 1
+
 s.exe = TCVN3
-chrome.exe = UNICODE
-zalo.exe = UNICODE
 ```
 
 ---
 
-## 4. Báo cáo Phản biện & Đánh giá Kiểm thử (Agent 3 Review)
-
-| Tiêu chí phản biện | Phân tích kỹ thuật & Đánh giá | Trạng thái |
-| :--- | :--- | :--- |
-| **Tránh xung đột phím (Hotkey Collision)** | Điều kiện yêu cầu chính xác `Ctrl + Shift` mà **không** có `Alt` hay `Win`. Khi bấm `Ctrl+Shift+F1/F2`, hook trả về `-1` ngay lập tức để ứng dụng foreground không nhận phím `F1`/`F2` (tránh bật menu Trợ giúp). | ĐẠT |
-| **Tránh kích hoạt nhầm chuyển ngôn ngữ** | OpenKey cho phép đổi Anh/Việt bằng `Ctrl+Shift`. Đoạn code đã set cờ `_hasJustUsedHotKey = true`, nhờ đó khi người dùng nhả phím `Shift`/`Ctrl`, OpenKey sẽ không kích hoạt toggle ngôn ngữ. | ĐẠT |
-| **Không gây lag gõ phím (Performance)** | Kiểm tra phím tắt trong `keyboardHookProcess` là $O(1)$. Việc nhận diện process chỉ diễn ra một lần duy nhất khi chuyển cửa sổ foreground trong sự kiện hệ thống `EVENT_SYSTEM_FOREGROUND`, hoàn toàn không can thiệp hay đọc file trong quá trình gõ chữ liên tục. | ĐẠT |
-| **Phân biệt hoa thường (Case Insensitivity)** | Tên tiến trình trên Windows có thể là `S.EXE`, `s.exe`, `Chrome.exe`. Module `ProcessRuleHelper` chuẩn hóa tất cả về chữ thường (`toLower`) trước khi đối chiếu map, đảm bảo nhận diện chính xác 100%. | ĐẠT |
-| **Cô lập phiên gõ chữ (Session Isolation)** | Khi chuyển cửa sổ, hàm `startNewSession()` được gọi để dọn sạch bộ đệm ký tự dở dang từ cửa sổ cũ, ngăn chặn hiện tượng backspace xóa nhầm nội dung trên ứng dụng mới. | ĐẠT |
-| **Độ ưu tiên giữa Auto Rule & Hotkey thủ công** | Khi người dùng chuyển vào `s.exe`, bảng mã tự chuyển về TCVN3. Nếu người dùng bấm `Ctrl+Shift+F1` để gõ Unicode trong `s.exe`, hệ thống cho phép giữ Unicode. Khi chuyển ra ngoài rồi quay lại `s.exe`, sự kiện kích hoạt lại chuyển về TCVN3 theo đúng mong muốn. | ĐẠT |
-| **Bảo tồn 100% giao diện gốc** | Không thay đổi bất kỳ file `.rc`, dialog hay icon nào trong giao diện đồ họa. Người dùng tùy biến thông qua file `.ini` gọn nhẹ. | ĐẠT |
-
----
-
-## 5. Hướng dẫn sử dụng
-1. **Sử dụng phím tắt**:
-   - Nhấn `Ctrl + Shift + F1` bất kỳ lúc nào để chuyển sang bảng mã **Unicode**.
-   - Nhấn `Ctrl + Shift + F2` bất kỳ lúc nào để chuyển sang bảng mã **TCVN3 (ABC)**.
-   - Một thông báo nhỏ sẽ xuất hiện ở góc phải màn hình xác nhận bảng mã hiện tại.
-2. **Sử dụng tự động theo ứng dụng**:
-   - Mở phần mềm `s.exe`: Bảng mã sẽ tự động chuyển thành **TCVN3**.
-   - Chuyển sang `chrome.exe` hoặc `zalo.exe`: Bảng mã sẽ tự động chuyển thành **Unicode**.
-   - Để thêm ứng dụng khác, mở file `process_rules.ini` và thêm dòng mới (ví dụ: `excel.exe = UNICODE` hoặc `foxpro.exe = TCVN3`).
+## 4. Hướng dẫn sử dụng & Kiểm tra
+1. **Phím tắt đổi bảng mã**:
+   - `Ctrl + Shift + F1`: Chuyển sang **Unicode**.
+   - `Ctrl + Shift + F2`: Chuyển sang **TCVN3 (ABC)**.
+2. **Khóa / Mở khóa tự động chuyển bảng mã**:
+   - **Cách 1**: Chuột phải vào biểu tượng OpenKey ở khay hệ thống $\rightarrow$ Nhấp vào dòng **"Tự động chuyển bảng mã theo ứng dụng"** để bỏ dấu tick (Khóa) hoặc bật dấu tick (Mở khóa).
+   - **Cách 2**: Bấm phím tắt **`Ctrl + Shift + F12`** bất cứ lúc nào. Thông báo Balloon sẽ hiển thị: *"Đã KHÓA tự động chuyển bảng mã"* hoặc *"Đã BẬT tự động chuyển bảng mã theo ứng dụng"*.
+   - **Cách 3**: Đặt `enabled = 0` trong file `process_rules.ini`.
+3. **Hoạt động giữ nguyên bảng mã (No Fallback)**:
+   - Khi vào `s.exe`: Bảng mã tự chuyển sang **TCVN3**.
+   - Khi chuyển sang Notepad, Word, trình duyệt hoặc bất kỳ app nào khác (không có trong rules): **Bảng mã vẫn giữ nguyên là TCVN3** (hoặc bảng mã bạn vừa chọn), tuyệt đối không bị tự động nhảy về Unicode nữa.

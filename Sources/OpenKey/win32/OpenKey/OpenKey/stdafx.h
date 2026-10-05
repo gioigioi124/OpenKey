@@ -87,3 +87,4 @@ extern int vRememberCode;
 extern int vOtherLanguage;
 extern int vTempOffOpenKey;
 extern int vFixChromiumBrowser;
+extern int vAutoSwitchCodeTable;

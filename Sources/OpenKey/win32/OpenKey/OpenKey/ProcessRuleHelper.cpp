@@ -33,10 +33,8 @@ void ProcessRuleHelper::initFilePath() {
 
 void ProcessRuleHelper::loadDefaultRules() {
     _rules.clear();
-    // Default rules according to user requirements
-    _rules["s.exe"] = 1;        // TCVN3 (ABC)
-    _rules["chrome.exe"] = 0;   // Unicode
-    _rules["zalo.exe"] = 0;     // Unicode
+    // Default rule: only s.exe -> TCVN3 (ABC)
+    _rules["s.exe"] = 1;
 }
 
 void ProcessRuleHelper::createDefaultIniFile() {
@@ -45,17 +43,23 @@ void ProcessRuleHelper::createDefaultIniFile() {
 
     outFile << "# ============================================================\n";
     outFile << "# OpenKey - Cau hinh tu dong nhan dien tien trinh & bang ma\n";
-    outFile << "# Dinh dang: [ten_tien_trinh] = [bang_ma]\n";
+    outFile << "#\n";
+    outFile << "# Cai dat khoa / bat tinh nang:\n";
+    outFile << "#   enabled = 1   (1: Bat tu dong chuyen, 0: Khoa / Tat)\n";
+    outFile << "#\n";
+    outFile << "# Dinh dang quy tac: [ten_tien_trinh] = [bang_ma]\n";
     outFile << "# Bang ma ho tro:\n";
     outFile << "#   0 hoac UNICODE          : Unicode dung san\n";
     outFile << "#   1 hoac TCVN3            : TCVN3 (ABC)\n";
     outFile << "#   2 hoac VNI              : VNI Windows\n";
     outFile << "#   3 hoac UNICODE_COMPOUND : Unicode to hop\n";
     outFile << "#   4 hoac VN_LOCALE_1258   : Vietnamese locale CP 1258\n";
+    outFile << "#\n";
+    outFile << "# Luu y: Cac phan mem KHONG co trong danh sach se GIU NGUYEN\n";
+    outFile << "# bang ma hien tai, KHONG tu dong fallback ve Unicode.\n";
     outFile << "# ============================================================\n\n";
+    outFile << "enabled = 1\n\n";
     outFile << "s.exe = TCVN3\n";
-    outFile << "chrome.exe = UNICODE\n";
-    outFile << "zalo.exe = UNICODE\n";
     outFile.close();
 }
 
@@ -113,7 +117,17 @@ void ProcessRuleHelper::reloadRules() {
             std::string procName = trimString(line.substr(0, eqPos));
             std::string codeStr = trimString(line.substr(eqPos + 1));
             if (!procName.empty()) {
-                _rules[toLower(procName)] = parseCodeTable(codeStr);
+                std::string lowerProc = toLower(procName);
+                if (lowerProc == "enabled" || lowerProc == "enable_auto_switch") {
+                    std::string lowerVal = toLower(codeStr);
+                    if (lowerVal == "0" || lowerVal == "false" || lowerVal == "off" || lowerVal == "no") {
+                        vAutoSwitchCodeTable = 0;
+                    } else {
+                        vAutoSwitchCodeTable = 1;
+                    }
+                    continue;
+                }
+                _rules[lowerProc] = parseCodeTable(codeStr);
             }
         }
     }
@@ -121,6 +135,9 @@ void ProcessRuleHelper::reloadRules() {
 }
 
 int ProcessRuleHelper::getCodeTableForProcess(const std::string& exeName) {
+    if (!vAutoSwitchCodeTable) {
+        return -1;
+    }
     if (!_isInitialized) {
         init();
     }
@@ -129,7 +146,7 @@ int ProcessRuleHelper::getCodeTableForProcess(const std::string& exeName) {
     if (it != _rules.end()) {
         return it->second;
     }
-    return -1; // Not in rules
+    return -1; // Not in rules -> DO NOT change encoding!
 }
 
 std::wstring ProcessRuleHelper::getCodeTableName(int code) {

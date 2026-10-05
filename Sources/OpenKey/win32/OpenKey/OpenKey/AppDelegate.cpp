@@ -1,4 +1,4 @@
-﻿/*----------------------------------------------------------
+/*----------------------------------------------------------
 OpenKey - The Cross platform Open source Vietnamese Keyboard application.
 
 Copyright (C) 2019 Mai Vu Tuyen
@@ -40,6 +40,7 @@ int vQuickEndConsonant = 0;
 int vOtherLanguage = 1;
 int vRememberCode = 1;
 int vTempOffOpenKey = 0;
+int vAutoSwitchCodeTable = 1;
 
 int vUseGrayIcon = 0;
 int vShowOnStartUp = 0;
@@ -236,6 +237,16 @@ void AppDelegate::onToggleUseMacro() {
 	APP_SET_DATA(vUseMacro, vUseMacro ? 0 : 1);
 	if (mainDialog) {
 		mainDialog->fillData();
+	}
+}
+
+void AppDelegate::onToggleAutoSwitchCodeTable() {
+	APP_SET_DATA(vAutoSwitchCodeTable, vAutoSwitchCodeTable ? 0 : 1);
+	SystemTrayHelper::updateData();
+	if (vAutoSwitchCodeTable) {
+		SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã BẬT tự động chuyển bảng mã theo ứng dụng"));
+	} else {
+		SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã KHÓA tự động chuyển bảng mã"));
 	}
 }
 

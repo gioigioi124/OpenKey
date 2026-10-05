@@ -21,6 +21,7 @@ redistribute your new version, it MUST be open source.
 #define POPUP_SPELLING 901
 #define POPUP_SMART_SWITCH 902
 #define POPUP_USE_MACRO 903
+#define POPUP_AUTO_SWITCH_CODETABLE 904
 
 #define POPUP_TELEX 910
 #define POPUP_VNI 911
@@ -57,6 +58,7 @@ map<UINT, LPCTSTR> menuData = {
 	{POPUP_SPELLING, _T("Bật kiểm tra chính tả")},
 	{POPUP_SMART_SWITCH, _T("Bật loại trừ ứng dụng thông minh")},
 	{POPUP_USE_MACRO, _T("Bật gõ tắt")},
+	{POPUP_AUTO_SWITCH_CODETABLE, _T("Tự động chuyển bảng mã theo ứng dụng")},
 	{POPUP_TELEX, _T("Kiểu gõ Telex")},
 	{POPUP_VNI, _T("Kiểu gõ VNI")},
 	{POPUP_SIMPLE_TELEX, _T("Kiểu gõ Simple Telex")},
@@ -115,6 +117,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 				break;
 			case POPUP_USE_MACRO:
 				AppDelegate::getInstance()->onToggleUseMacro();
+				break;
+			case POPUP_AUTO_SWITCH_CODETABLE:
+				AppDelegate::getInstance()->onToggleAutoSwitchCodeTable();
 				break;
 			case POPUP_MACRO_TABLE:
 				AppDelegate::getInstance()->onMacroTable();
@@ -206,6 +211,7 @@ void SystemTrayHelper::createPopupMenu() {
 	AppendMenu(popupMenu, MF_CHECKED, POPUP_SPELLING, menuData[POPUP_SPELLING]);
 	AppendMenu(popupMenu, MF_CHECKED, POPUP_SMART_SWITCH, menuData[POPUP_SMART_SWITCH]);
 	AppendMenu(popupMenu, MF_CHECKED, POPUP_USE_MACRO, menuData[POPUP_USE_MACRO]);
+	AppendMenu(popupMenu, MF_CHECKED, POPUP_AUTO_SWITCH_CODETABLE, menuData[POPUP_AUTO_SWITCH_CODETABLE]);
 	AppendMenu(popupMenu, MF_SEPARATOR, 0, 0);
 	AppendMenu(popupMenu, MF_UNCHECKED, POPUP_MACRO_TABLE, menuData[POPUP_MACRO_TABLE]);
 	AppendMenu(popupMenu, MF_UNCHECKED, POPUP_CONVERT_TOOL, menuData[POPUP_CONVERT_TOOL]);
@@ -260,6 +266,7 @@ void SystemTrayHelper::updateData() {
 	MODIFY_MENU(popupMenu, POPUP_SPELLING, vCheckSpelling);
 	MODIFY_MENU(popupMenu, POPUP_SMART_SWITCH, vUseSmartSwitchKey);
 	MODIFY_MENU(popupMenu, POPUP_USE_MACRO, vUseMacro);
+	MODIFY_MENU(popupMenu, POPUP_AUTO_SWITCH_CODETABLE, vAutoSwitchCodeTable);
 	MODIFY_MENU(popupMenu, POPUP_TELEX, vInputType == 0);
 	MODIFY_MENU(popupMenu, POPUP_VNI, vInputType == 1);
 	MODIFY_MENU(popupMenu, POPUP_SIMPLE_TELEX, vInputType == 2);
