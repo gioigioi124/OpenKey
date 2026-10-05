@@ -162,6 +162,9 @@ void OpenKeyInit() {
 	BYTE* data = OpenKeyHelper::getRegBinary(_T("smartSwitchKey"), smartSwitchKeySize);
 	initSmartSwitchKey((Byte*)data, (int)smartSwitchKeySize);
 
+	//init process rules for auto encoding switch
+	ProcessRuleHelper::init();
+
 	//init hook
 	HINSTANCE hInstance = GetModuleHandle(NULL);
 	hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardHookProcess, hInstance, 0);
@@ -517,6 +520,31 @@ LRESULT CALLBACK keyboardHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 
 	//switch language shortcut; convert hotkey
 	if ((wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && !_isFlagKey && _keycode != 0) {
+		// Hotkeys: Ctrl + Shift + F1 (Unicode), Ctrl + Shift + F2 (TCVN3)
+		if ((_flag & MASK_CONTROL) && (_flag & MASK_SHIFT) && !(_flag & MASK_ALT) && !(_flag & MASK_WIN)) {
+			if (_keycode == VK_F1) {
+				AppDelegate::getInstance()->onTableCode(0);
+				SystemTrayHelper::updateData();
+				SystemTrayHelper::showNotification(_T("OpenKey"), _T("Bảng mã: Unicode"));
+				if (HAS_BEEP(vSwitchKeyStatus)) {
+					MessageBeep(MB_OK);
+				}
+				_hasJustUsedHotKey = true;
+				_keycode = 0;
+				return -1;
+			} else if (_keycode == VK_F2) {
+				AppDelegate::getInstance()->onTableCode(1);
+				SystemTrayHelper::updateData();
+				SystemTrayHelper::showNotification(_T("OpenKey"), _T("Bảng mã: TCVN3 (ABC)"));
+				if (HAS_BEEP(vSwitchKeyStatus)) {
+					MessageBeep(MB_OK);
+				}
+				_hasJustUsedHotKey = true;
+				_keycode = 0;
+				return -1;
+			}
+		}
+
 		if (GET_SWITCH_KEY(vSwitchKeyStatus) != _keycode && GET_SWITCH_KEY(convertToolHotKey) != _keycode) {
 			_lastFlag = 0;
 		} else {
@@ -672,11 +700,21 @@ LRESULT CALLBACK mouseHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
-	//smart switch key
+	string& exe = OpenKeyHelper::getFrontMostAppExecuteName();
+	if (exe.compare("explorer.exe") == 0) //dont apply with windows explorer
+		return;
+
+	// 1. Check process-based rules first (e.g. s.exe -> TCVN3, chrome.exe/zalo.exe -> Unicode)
+	int ruleCode = ProcessRuleHelper::getCodeTableForProcess(exe);
+	if (ruleCode != -1) {
+		if (vCodeTable != ruleCode) {
+			AppDelegate::getInstance()->onTableCode(ruleCode);
+			SystemTrayHelper::updateData();
+		}
+	}
+
+	// 2. Smart switch key & Remember code
 	if (vUseSmartSwitchKey || vRememberCode) {
-		string& exe = OpenKeyHelper::getFrontMostAppExecuteName();
-		if (exe.compare("explorer.exe") == 0) //dont apply with windows explorer
-			return;
 		_languageTemp = getAppInputMethodStatus(exe, vLanguage | (vCodeTable << 1));
 		vTempOffEngine(false);
 		if (vUseSmartSwitchKey && (_languageTemp & 0x01) != vLanguage) {
@@ -688,16 +726,20 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 			}
 		}
 		startNewSession();
-		if (vRememberCode && (_languageTemp >> 1) != vCodeTable) { //for remember table code feature
+		// If rule matched this app, rule takes precedence over remembered code table
+		if (ruleCode == -1 && vRememberCode && (_languageTemp >> 1) != vCodeTable) {
 			if (_languageTemp != -1) {
 				AppDelegate::getInstance()->onTableCode(_languageTemp >> 1);
 			} else {
 				saveSmartSwitchKeyData();
 			}
 		}
-		if (vSupportMetroApp && exe.compare("ApplicationFrameHost.exe") == 0) {//Metro App
-			SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
-			SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
-		}
+	} else {
+		startNewSession();
+	}
+
+	if (vSupportMetroApp && exe.compare("ApplicationFrameHost.exe") == 0) {//Metro App
+		SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
+		SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
 	}
 }

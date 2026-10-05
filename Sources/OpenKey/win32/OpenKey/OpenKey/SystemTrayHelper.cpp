@@ -1,4 +1,4 @@
-﻿/*----------------------------------------------------------
+/*----------------------------------------------------------
 OpenKey - The Cross platform Open source Vietnamese Keyboard application.
 
 Copyright (C) 2019 Mai Vu Tuyen
@@ -364,3 +364,20 @@ void SystemTrayHelper::createSystemTrayIcon(const HINSTANCE& hIns) {
 void SystemTrayHelper::removeSystemTray() {
 	Shell_NotifyIcon(NIM_DELETE, &nid);
 }
+
+void SystemTrayHelper::showNotification(LPCTSTR title, LPCTSTR message) {
+	if (nid.hWnd == NULL) return;
+	nid.uFlags |= NIF_INFO;
+	if (title != NULL) {
+		wcsncpy_s(nid.szInfoTitle, title, _countof(nid.szInfoTitle));
+	} else {
+		nid.szInfoTitle[0] = L'\0';
+	}
+	if (message != NULL) {
+		wcsncpy_s(nid.szInfo, message, _countof(nid.szInfo));
+	} else {
+		nid.szInfo[0] = L'\0';
+	}
+	nid.dwInfoFlags = NIIF_INFO;
+	Shell_NotifyIcon(NIM_MODIFY, &nid);
+}

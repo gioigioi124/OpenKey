@@ -45,6 +45,7 @@ redistribute your new version, it MUST be open source.
 #include "OpenKeyManager.h"
 #include "OpenKeyHelper.h"
 #include "SystemTrayHelper.h"
+#include "ProcessRuleHelper.h"
 
 using namespace std;
 

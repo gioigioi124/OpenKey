@@ -25,5 +25,6 @@ public:
 	static void createSystemTrayIcon(const HINSTANCE& hIns);
 	static void updateData();
 	static void removeSystemTray();
+	static void showNotification(LPCTSTR title, LPCTSTR message);
 };
 
