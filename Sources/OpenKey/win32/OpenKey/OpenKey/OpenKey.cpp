@@ -41,6 +41,7 @@ extern int vRunWithWindows;
 static HHOOK hKeyboardHook;
 static HHOOK hMouseHook;
 static HWINEVENTHOOK hSystemEvent;
+static HWINEVENTHOOK hTitleEvent;
 static KBDLLHOOKSTRUCT* keyboardData;
 static MSLLHOOKSTRUCT* mouseData;
 static vKeyHookState* pData;
@@ -75,6 +76,10 @@ void OpenKeyFree() {
 	UnhookWindowsHookEx(hMouseHook);
 	UnhookWindowsHookEx(hKeyboardHook);
 	UnhookWinEvent(hSystemEvent);
+	if (hTitleEvent) {
+		UnhookWinEvent(hTitleEvent);
+		hTitleEvent = NULL;
+	}
 }
 
 void OpenKeyInit() {
@@ -171,6 +176,7 @@ void OpenKeyInit() {
 	hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardHookProcess, hInstance, 0);
 	hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseHookProcess, hInstance, 0);
 	hSystemEvent = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+	hTitleEvent = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 }
 
 void saveSmartSwitchKeyData() {
@@ -706,13 +712,19 @@ LRESULT CALLBACK mouseHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
+	if (dwEvent == EVENT_OBJECT_NAMECHANGE) {
+		if (idObject != OBJID_WINDOW || hwnd != GetForegroundWindow())
+			return;
+	}
+
 	string& exe = OpenKeyHelper::getFrontMostAppExecuteName();
 	if (exe.compare("explorer.exe") == 0) //dont apply with windows explorer
 		return;
 
-	// 1. Process recognition rule (only active when not locked)
+	// 1. Process & Title recognition rule (only active when not locked)
 	if (vAutoSwitchCodeTable) {
-		int ruleCode = ProcessRuleHelper::getCodeTableForProcess(exe);
+		string title = OpenKeyHelper::getFrontMostWindowTitleUtf8();
+		int ruleCode = ProcessRuleHelper::getCodeTableForProcessAndTitle(exe, title);
 		if (ruleCode != -1) {
 			if (vCodeTable != ruleCode) {
 				AppDelegate::getInstance()->onTableCode(ruleCode);
@@ -723,7 +735,7 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 	}
 
 	// 2. Smart switch key (for Vietnamese/English language toggle only, NO code table fallback)
-	if (vUseSmartSwitchKey) {
+	if (dwEvent == EVENT_SYSTEM_FOREGROUND && vUseSmartSwitchKey) {
 		_languageTemp = getAppInputMethodStatus(exe, vLanguage | (vCodeTable << 1));
 		vTempOffEngine(false);
 		if ((_languageTemp & 0x01) != vLanguage) {
@@ -736,10 +748,12 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 		}
 	}
 
-	startNewSession();
+	if (dwEvent == EVENT_SYSTEM_FOREGROUND) {
+		startNewSession();
 
-	if (vSupportMetroApp && exe.compare("ApplicationFrameHost.exe") == 0) {//Metro App
-		SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
-		SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
+		if (vSupportMetroApp && exe.compare("ApplicationFrameHost.exe") == 0) {//Metro App
+			SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
+			SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);
+		}
 	}
 }

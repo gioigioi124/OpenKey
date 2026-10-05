@@ -1,12 +1,12 @@
 /*----------------------------------------------------------
-OpenKey - Process Rule Helper for Auto Encoding Switch
+OpenKey - Process & Window Title Rule Helper for Auto Encoding Switch
 -----------------------------------------------------------*/
 #include "ProcessRuleHelper.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
 
-std::map<std::string, int> ProcessRuleHelper::_rules;
+std::vector<AppRuleItem> ProcessRuleHelper::_ruleItems;
 bool ProcessRuleHelper::_isInitialized = false;
 std::wstring ProcessRuleHelper::_iniFilePath = L"";
 
@@ -18,6 +18,37 @@ std::string ProcessRuleHelper::toLower(const std::string& str) {
         }
     }
     return result;
+}
+
+bool ProcessRuleHelper::isDelimiter(char c) {
+    // Delimiters include space, dot, hyphen, underscore, brackets, quotes, etc.
+    return !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
+}
+
+bool ProcessRuleHelper::matchesTitle(const std::string& title, const std::string& pattern) {
+    if (pattern.empty()) return true;
+    if (title.empty()) return false;
+
+    std::string lowerTitle = toLower(title);
+    std::string lowerPattern = toLower(pattern);
+
+    size_t pos = 0;
+    while ((pos = lowerTitle.find(lowerPattern, pos)) != std::string::npos) {
+        // Check character before match
+        bool beforeOk = (pos == 0) || isDelimiter(lowerTitle[pos - 1]);
+
+        // Check character after match
+        size_t afterPos = pos + lowerPattern.length();
+        bool afterOk = (afterPos == lowerTitle.length()) || isDelimiter(lowerTitle[afterPos]);
+
+        if (beforeOk && afterOk) {
+            return true;
+        }
+
+        pos += 1;
+    }
+
+    return false;
 }
 
 void ProcessRuleHelper::initFilePath() {
@@ -32,9 +63,11 @@ void ProcessRuleHelper::initFilePath() {
 }
 
 void ProcessRuleHelper::loadDefaultRules() {
-    _rules.clear();
-    // Default rule: only s.exe -> TCVN3 (ABC)
-    _rules["s.exe"] = 1;
+    _ruleItems.clear();
+    // Default rules according to user requirements:
+    _ruleItems.push_back({ "s.exe", "", 1 });         // s.exe -> TCVN3
+    _ruleItems.push_back({ "excel.exe", "a", 1 });     // excel with file 'a' -> TCVN3
+    _ruleItems.push_back({ "excel.exe", "b", 0 });     // excel with file 'b' -> Unicode
 }
 
 void ProcessRuleHelper::createDefaultIniFile() {
@@ -47,7 +80,21 @@ void ProcessRuleHelper::createDefaultIniFile() {
     outFile << "# Cai dat khoa / bat tinh nang:\n";
     outFile << "#   enabled = 1   (1: Bat tu dong chuyen, 0: Khoa / Tat)\n";
     outFile << "#\n";
-    outFile << "# Dinh dang quy tac: [ten_tien_trinh] = [bang_ma]\n";
+    outFile << "# Dinh dang quy tac ho tro:\n";
+    outFile << "# 1. Theo tien trinh:\n";
+    outFile << "#      [ten_tien_trinh] = [bang_ma]\n";
+    outFile << "#      Vi du: s.exe = TCVN3\n";
+    outFile << "#\n";
+    outFile << "# 2. Theo tien trinh + ten file / tieu de cua so:\n";
+    outFile << "#      [ten_tien_trinh][ten_file] = [bang_ma]\n";
+    outFile << "#      Vi du: excel.exe[a] = TCVN3\n";
+    outFile << "#             excel.exe[b] = UNICODE\n";
+    outFile << "#\n";
+    outFile << "# 3. Theo tieu de / ten file chung:\n";
+    outFile << "#      title:[ten_file] = [bang_ma]\n";
+    outFile << "#      Vi du: title:a = TCVN3\n";
+    outFile << "#             title:b = UNICODE\n";
+    outFile << "#\n";
     outFile << "# Bang ma ho tro:\n";
     outFile << "#   0 hoac UNICODE          : Unicode dung san\n";
     outFile << "#   1 hoac TCVN3            : TCVN3 (ABC)\n";
@@ -55,11 +102,13 @@ void ProcessRuleHelper::createDefaultIniFile() {
     outFile << "#   3 hoac UNICODE_COMPOUND : Unicode to hop\n";
     outFile << "#   4 hoac VN_LOCALE_1258   : Vietnamese locale CP 1258\n";
     outFile << "#\n";
-    outFile << "# Luu y: Cac phan mem KHONG co trong danh sach se GIU NGUYEN\n";
-    outFile << "# bang ma hien tai, KHONG tu dong fallback ve Unicode.\n";
+    outFile << "# Luu y: Cac phan mem / file KHONG co trong danh sach se\n";
+    outFile << "# GIU NGUYEN bang ma hien tai, KHONG tu dong fallback ve Unicode.\n";
     outFile << "# ============================================================\n\n";
     outFile << "enabled = 1\n\n";
     outFile << "s.exe = TCVN3\n";
+    outFile << "excel.exe[a] = TCVN3\n";
+    outFile << "excel.exe[b] = UNICODE\n";
     outFile.close();
 }
 
@@ -105,6 +154,8 @@ void ProcessRuleHelper::reloadRules() {
         return;
     }
 
+    _ruleItems.clear();
+
     std::string line;
     while (std::getline(inFile, line)) {
         line = trimString(line);
@@ -114,39 +165,98 @@ void ProcessRuleHelper::reloadRules() {
 
         size_t eqPos = line.find('=');
         if (eqPos != std::string::npos) {
-            std::string procName = trimString(line.substr(0, eqPos));
-            std::string codeStr = trimString(line.substr(eqPos + 1));
-            if (!procName.empty()) {
-                std::string lowerProc = toLower(procName);
-                if (lowerProc == "enabled" || lowerProc == "enable_auto_switch") {
-                    std::string lowerVal = toLower(codeStr);
-                    if (lowerVal == "0" || lowerVal == "false" || lowerVal == "off" || lowerVal == "no") {
-                        vAutoSwitchCodeTable = 0;
-                    } else {
-                        vAutoSwitchCodeTable = 1;
-                    }
-                    continue;
+            std::string rawKey = trimString(line.substr(0, eqPos));
+            std::string rawVal = trimString(line.substr(eqPos + 1));
+            std::string lowerKey = toLower(rawKey);
+
+            if (lowerKey == "enabled" || lowerKey == "enable_auto_switch") {
+                std::string lowerVal = toLower(rawVal);
+                if (lowerVal == "0" || lowerVal == "false" || lowerVal == "off" || lowerVal == "no") {
+                    vAutoSwitchCodeTable = 0;
+                } else {
+                    vAutoSwitchCodeTable = 1;
                 }
-                _rules[lowerProc] = parseCodeTable(codeStr);
+                continue;
+            }
+
+            int code = parseCodeTable(rawVal);
+            AppRuleItem item;
+            item.codeTable = code;
+
+            // Check if key is formatted as process[title]
+            size_t bracketOpen = lowerKey.find('[');
+            size_t bracketClose = lowerKey.find(']');
+            if (bracketOpen != std::string::npos && bracketClose != std::string::npos && bracketClose > bracketOpen) {
+                std::string prefix = trimString(lowerKey.substr(0, bracketOpen));
+                std::string pattern = trimString(lowerKey.substr(bracketOpen + 1, bracketClose - bracketOpen - 1));
+                item.processName = (prefix == "title") ? "" : prefix;
+                item.titlePattern = pattern;
+                _ruleItems.push_back(item);
+            } else {
+                size_t colonPos = lowerKey.find(':');
+                if (colonPos != std::string::npos) {
+                    std::string prefix = trimString(lowerKey.substr(0, colonPos));
+                    std::string pattern = trimString(lowerKey.substr(colonPos + 1));
+                    item.processName = (prefix == "title") ? "" : prefix;
+                    item.titlePattern = pattern;
+                    _ruleItems.push_back(item);
+                } else if (lowerKey.find(".xls") != std::string::npos || lowerKey.find(".doc") != std::string::npos || lowerKey.find(".txt") != std::string::npos) {
+                    item.processName = "";
+                    item.titlePattern = lowerKey;
+                    _ruleItems.push_back(item);
+                } else {
+                    item.processName = lowerKey;
+                    item.titlePattern = "";
+                    _ruleItems.push_back(item);
+                }
             }
         }
     }
     inFile.close();
 }
 
-int ProcessRuleHelper::getCodeTableForProcess(const std::string& exeName) {
+int ProcessRuleHelper::getCodeTableForProcessAndTitle(const std::string& exeName, const std::string& windowTitle) {
     if (!vAutoSwitchCodeTable) {
         return -1;
     }
     if (!_isInitialized) {
         init();
     }
-    std::string lowerName = toLower(exeName);
-    auto it = _rules.find(lowerName);
-    if (it != _rules.end()) {
-        return it->second;
+    std::string lowerExe = toLower(exeName);
+    std::string lowerTitle = toLower(windowTitle);
+
+    // Pass 1: Rules matching BOTH specific processName AND titlePattern
+    for (const auto& item : _ruleItems) {
+        if (!item.processName.empty() && !item.titlePattern.empty()) {
+            if (lowerExe == item.processName && matchesTitle(lowerTitle, item.titlePattern)) {
+                return item.codeTable;
+            }
+        }
     }
-    return -1; // Not in rules -> DO NOT change encoding!
+
+    // Pass 2: Rules matching titlePattern only (processName is empty)
+    for (const auto& item : _ruleItems) {
+        if (item.processName.empty() && !item.titlePattern.empty()) {
+            if (matchesTitle(lowerTitle, item.titlePattern)) {
+                return item.codeTable;
+            }
+        }
+    }
+
+    // Pass 3: Rules matching processName only (titlePattern is empty)
+    for (const auto& item : _ruleItems) {
+        if (!item.processName.empty() && item.titlePattern.empty()) {
+            if (lowerExe == item.processName) {
+                return item.codeTable;
+            }
+        }
+    }
+
+    return -1; // No match -> Keep current code table!
+}
+
+int ProcessRuleHelper::getCodeTableForProcess(const std::string& exeName) {
+    return getCodeTableForProcessAndTitle(exeName, "");
 }
 
 std::wstring ProcessRuleHelper::getCodeTableName(int code) {

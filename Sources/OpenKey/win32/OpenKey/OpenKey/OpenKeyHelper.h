@@ -34,6 +34,7 @@ public:
 
 	static string& getFrontMostAppExecuteName();
 	static string& getLastAppExecuteName();
+	static string getFrontMostWindowTitleUtf8();
 
 	static wstring getFullPath();
 

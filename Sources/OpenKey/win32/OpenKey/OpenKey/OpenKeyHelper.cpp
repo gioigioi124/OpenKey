@@ -155,6 +155,19 @@ string & OpenKeyHelper::getLastAppExecuteName() {
 	return _exeNameUtf8;
 }
 
+string OpenKeyHelper::getFrontMostWindowTitleUtf8() {
+	HWND hForeground = GetForegroundWindow();
+	if (!hForeground) return "";
+	WCHAR titleBuf[1024] = { 0 };
+	int len = GetWindowTextW(hForeground, titleBuf, 1024);
+	if (len <= 0) return "";
+	int size_needed = WideCharToMultiByte(CP_UTF8, 0, titleBuf, len, NULL, 0, NULL, NULL);
+	if (size_needed <= 0) return "";
+	std::string strTo(size_needed, 0);
+	WideCharToMultiByte(CP_UTF8, 0, titleBuf, len, &strTo[0], size_needed, NULL, NULL);
+	return strTo;
+}
+
 wstring OpenKeyHelper::getFullPath() {
 	HMODULE hModule = GetModuleHandle(NULL);
 	TCHAR path[MAX_PATH];
