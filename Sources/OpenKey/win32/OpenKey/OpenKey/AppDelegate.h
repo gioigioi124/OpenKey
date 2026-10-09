@@ -41,6 +41,7 @@ public: //event
 	void onToggleUseSmartSwitchKey();
 	void onToggleUseMacro();
 	void onToggleAutoSwitchCodeTable();
+	void onToggleFallbackToUnicode();
 
 	void onMacroTable();
 	void onConvertTool();

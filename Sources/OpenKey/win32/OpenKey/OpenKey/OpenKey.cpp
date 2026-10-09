@@ -114,6 +114,7 @@ void OpenKeyInit() {
 	APP_GET_DATA(vRememberCode, 1);
 	APP_GET_DATA(vOtherLanguage, 1);
 	APP_GET_DATA(vAutoSwitchCodeTable, 1);
+	APP_GET_DATA(vFallbackToUnicode, 0);
 	APP_GET_DATA(vTempOffOpenKey, 0);
 	APP_GET_DATA(vFixChromiumBrowser, 0);
 
@@ -730,8 +731,13 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 				AppDelegate::getInstance()->onTableCode(ruleCode);
 				SystemTrayHelper::updateData();
 			}
+		} else if (vFallbackToUnicode) {
+			if (vCodeTable != 0) {
+				AppDelegate::getInstance()->onTableCode(0);
+				SystemTrayHelper::updateData();
+			}
 		}
-		// If ruleCode == -1, do NOT change vCodeTable! Retain current encoding without fallback!
+		// If ruleCode == -1 and !vFallbackToUnicode, retain current encoding without fallback!
 	}
 
 	// 2. Smart switch key (for Vietnamese/English language toggle only, NO code table fallback)

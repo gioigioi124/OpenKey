@@ -78,7 +78,8 @@ void ProcessRuleHelper::createDefaultIniFile() {
     outFile << "# OpenKey - Cau hinh tu dong nhan dien tien trinh & bang ma\n";
     outFile << "#\n";
     outFile << "# Cai dat khoa / bat tinh nang:\n";
-    outFile << "#   enabled = 1   (1: Bat tu dong chuyen, 0: Khoa / Tat)\n";
+    outFile << "#   enabled = 1               (1: Bat tu dong chuyen, 0: Khoa / Tat)\n";
+    outFile << "#   fallback_to_unicode = 0   (1: Bat fallback ve Unicode khi roi app, 0: Giu nguyen bang ma)\n";
     outFile << "#\n";
     outFile << "# Dinh dang quy tac ho tro:\n";
     outFile << "# 1. Theo tien trinh:\n";
@@ -102,10 +103,11 @@ void ProcessRuleHelper::createDefaultIniFile() {
     outFile << "#   3 hoac UNICODE_COMPOUND : Unicode to hop\n";
     outFile << "#   4 hoac VN_LOCALE_1258   : Vietnamese locale CP 1258\n";
     outFile << "#\n";
-    outFile << "# Luu y: Cac phan mem / file KHONG co trong danh sach se\n";
-    outFile << "# GIU NGUYEN bang ma hien tai, KHONG tu dong fallback ve Unicode.\n";
+    outFile << "# Luu y: Neu fallback_to_unicode = 0, cac phan mem / file\n";
+    outFile << "# KHONG co trong danh sach se GIU NGUYEN bang ma hien tai.\n";
     outFile << "# ============================================================\n\n";
-    outFile << "enabled = 1\n\n";
+    outFile << "enabled = 1\n";
+    outFile << "fallback_to_unicode = 0\n\n";
     outFile << "s.exe = TCVN3\n";
     outFile << "excel.exe[a] = TCVN3\n";
     outFile << "excel.exe[b] = UNICODE\n";
@@ -175,6 +177,16 @@ void ProcessRuleHelper::reloadRules() {
                     vAutoSwitchCodeTable = 0;
                 } else {
                     vAutoSwitchCodeTable = 1;
+                }
+                continue;
+            }
+
+            if (lowerKey == "fallback_to_unicode" || lowerKey == "fallback_unicode" || lowerKey == "fallback") {
+                std::string lowerVal = toLower(rawVal);
+                if (lowerVal == "1" || lowerVal == "true" || lowerVal == "on" || lowerVal == "yes") {
+                    vFallbackToUnicode = 1;
+                } else {
+                    vFallbackToUnicode = 0;
                 }
                 continue;
             }

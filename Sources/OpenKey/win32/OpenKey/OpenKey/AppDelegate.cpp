@@ -41,6 +41,7 @@ int vOtherLanguage = 1;
 int vRememberCode = 1;
 int vTempOffOpenKey = 0;
 int vAutoSwitchCodeTable = 1;
+int vFallbackToUnicode = 0;
 
 int vUseGrayIcon = 0;
 int vShowOnStartUp = 0;
@@ -175,6 +176,7 @@ void AppDelegate::onDefaultConfig() {
 	APP_SET_DATA(vInputType, 0);
 	vFreeMark = 0;
 	APP_SET_DATA(vCodeTable, 0);
+	onTableCodeChange();
 	APP_SET_DATA(vCheckSpelling, 1);
 	APP_SET_DATA(vUseModernOrthography, 0);
 	APP_SET_DATA(vQuickTelex, 0);
@@ -250,6 +252,16 @@ void AppDelegate::onToggleAutoSwitchCodeTable() {
 	}
 }
 
+void AppDelegate::onToggleFallbackToUnicode() {
+	APP_SET_DATA(vFallbackToUnicode, vFallbackToUnicode ? 0 : 1);
+	SystemTrayHelper::updateData();
+	if (vFallbackToUnicode) {
+		SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã BẬT fallback về Unicode"));
+	} else {
+		SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã TẮT fallback về Unicode"));
+	}
+}
+
 void AppDelegate::onMacroTable() {
 	if (macroDialog == NULL) {
 		macroDialog = new MacroDialog(hInstance, IDD_DIALOG_MACRO);
@@ -288,9 +300,11 @@ void AppDelegate::onInputType(const int & type) {
 
 void AppDelegate::onTableCode(const int & code) {
 	APP_SET_DATA(vCodeTable, code);
+	onTableCodeChange();
 	if (mainDialog) {
 		mainDialog->fillData();
 	}
+	SystemTrayHelper::updateData();
 	if (vRememberCode) {
 		setAppInputMethodStatus(OpenKeyHelper::getFrontMostAppExecuteName(), vLanguage | (vCodeTable << 1));
 		saveSmartSwitchKeyData();

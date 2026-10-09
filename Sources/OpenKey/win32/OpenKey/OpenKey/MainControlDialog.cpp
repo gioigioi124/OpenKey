@@ -1,4 +1,4 @@
-﻿/*----------------------------------------------------------
+/*----------------------------------------------------------
 OpenKey - The Cross platform Open source Vietnamese Keyboard application.
 
 Copyright (C) 2019 Mai Vu Tuyen
@@ -388,15 +388,12 @@ void MainControlDialog::setSwitchKey(const unsigned short& code) {
 void MainControlDialog::onComboBoxSelected(const HWND& hCombobox, const int& comboboxId) {
     if (hCombobox == comboBoxInputType) {
         APP_SET_DATA(vInputType, (int)SendMessage(hCombobox, CB_GETCURSEL, 0, 0));
+        SystemTrayHelper::updateData();
     }
     else if (hCombobox == comboBoxTableCode) {
-        APP_SET_DATA(vCodeTable, (int)SendMessage(hCombobox, CB_GETCURSEL, 0, 0));
-        if (vRememberCode) {
-            setAppInputMethodStatus(OpenKeyHelper::getFrontMostAppExecuteName(), vLanguage | (vCodeTable << 1));
-            saveSmartSwitchKeyData();
-        }
+        int code = (int)SendMessage(hCombobox, CB_GETCURSEL, 0, 0);
+        AppDelegate::getInstance()->onTableCode(code);
     }
-    SystemTrayHelper::updateData();
 }
 
 void MainControlDialog::onCheckboxClicked(const HWND& hWnd) {
