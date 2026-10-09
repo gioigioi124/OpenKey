@@ -41,3 +41,42 @@ Toàn bộ dữ liệu mã phím tắt (`macroContentCode`) trong bộ nhớ ph�
 ### Tính toàn vẹn và Tương thích
 - [ ] Biên dịch `OpenKey.exe` thành công qua `build.bat`.
 - [ ] Giữ nguyên 100% các tính năng hiện tại: phím tắt `Ctrl + Shift + F1/F2/F12`, nhận diện ứng dụng/tiêu đề file trong `process_rules.ini`, tùy chọn Fallback về Unicode và giao diện khay hệ thống.
+
+
+## 2026-10-09T03:41:32Z
+
+Chuyển đổi cơ chế gõ tắt (Macro) trong OpenKey Win32 sang On-demand / Lazy Conversion: loại bỏ cơ chế cũ dịch trước và lưu trữ toàn bộ mã phím macro trong RAM (`macroContentCode`), thay bằng cơ chế dịch động tức thời (Just-In-Time) đúng từ tắt được kích hoạt theo bảng mã hiện hành, giúp tối ưu triệt để tài nguyên và triệt tiêu mọi phép tính dư thừa khi chuyển đổi bảng mã liên tục.
+
+Working directory: C:\Users\Administrator\Desktop\OpenKey
+Integrity mode: development
+
+Phân rã nhiệm vụ cho 3 Agents: Agent 1 lên kế hoạch, Agent 2 viết code, Agent 3 kiểm tra và lưu lại tiến trình kết quả vào file md.
+
+## Requirements
+
+### R1. Triển khai cơ chế On-demand / Lazy Conversion cho Macro
+- Khi người dùng gõ từ tắt và kích hoạt (bấm phím cách hoặc ký tự kết thúc từ tắt), engine sẽ tìm kiếm từ tắt trong `macroMap` và **chuyển đổi động (on-demand / JIT)** đúng nội dung của từ đó (`macroContent`) sang bảng mã hiện hành (`vCodeTable`) tại hàm `findMacro()`.
+- Hỗ trợ đầy đủ chức năng tự động viết hoa theo ký tự đầu (`vAutoCapsMacro`).
+
+### R2. Loại bỏ cơ chế cũ lưu trữ và dịch trước toàn bộ macro trong RAM
+- Loại bỏ việc tiền biên dịch toàn bộ `macroContentCode` khi khởi động app (`initMacroMap`) và khi thêm macro mới (`addMacro`).
+- Đơn giản hóa cấu trúc dữ liệu `MacroData` hoặc bỏ việc giữ mảng phím tắt dịch trước trong RAM cho toàn bộ danh sách.
+- Biến hàm `onTableCodeChange()` thành thao tác không tốn tài nguyên (no-op hoặc dọn dẹp nhẹ nếu có cache), đảm bảo khi chuyển đổi bảng mã (qua phím tắt, menu khay, hoặc tự động nhận diện ứng dụng) đạt độ phức tạp $O(1)$ với 0% CPU.
+
+### R3. Kiểm thử, Biên dịch và Ghi nhận Tiến trình (Documentation)
+- Biên dịch thành công `OpenKey.exe` qua `build.bat` trên môi trường Windows.
+- Agent 3 tiến hành kiểm thử toàn diện các trường hợp (gõ tắt tiếng Việt ở Unicode, TCVN3, VNI; chuyển đổi bảng mã liên tục; kiểm tra tính mượt mà không độ trễ).
+- Ghi chép đầy đủ tiến trình, so sánh hiệu năng và kết quả kiểm thử vào tệp Markdown kỹ thuật.
+
+## Acceptance Criteria
+
+### Tính đúng đắn của cơ chế On-demand (Lazy Conversion)
+- [ ] Khi gõ tắt ở bảng mã Unicode: Từ tắt bung ra đúng ký tự tiếng Việt Unicode.
+- [ ] Chuyển sang TCVN3 và gõ tắt: Đúng ký tự TCVN3 (ABC) được bung ra ngay lập tức theo bảng mã mới.
+- [ ] Chuyển sang VNI và gõ tắt: Đúng ký tự VNI được bung ra.
+- [ ] Chuyển đổi bảng mã liên tục qua lại nhiều lần: Thao tác chuyển bảng mã tức thì, không chạy vòng lặp dịch lại danh sách macro.
+- [ ] Tính năng viết hoa chữ cái đầu (Auto Caps Macro) hoạt động chính xác với cơ chế On-demand.
+
+### Biên dịch & Tài liệu
+- [ ] Biên dịch ra `OpenKey.exe` thành công 100% không có lỗi.
+- [ ] Lưu lại báo cáo tiến trình và tài liệu kỹ thuật chi tiết vào tệp Markdown trong dự án.

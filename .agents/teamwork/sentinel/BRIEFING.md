@@ -1,13 +1,13 @@
-# BRIEFING — 2026-10-09T02:56:10Z
+# BRIEFING — 2026-10-09T04:14:00Z
 
 ## Mission
-Coordinate and monitor OpenKey Win32 Macro table code sync bugfix workflow.
+Convert OpenKey Win32 Macro mechanism to On-demand / Lazy (JIT) Conversion, remove pre-compiled macroContentCode in RAM, make table code switching O(1), compile OpenKey.exe, and verify via 3 agents.
 
 ## 🔒 My Identity
 - Archetype: sentinel
 - Working directory: C:\Users\Administrator\Desktop\OpenKey\.agents\teamwork\sentinel\
-- Orchestrator: 658ac2ea-0e4c-4f15-acdd-165a0246e2d6 (terminated post-audit)
-- Victory Auditor: 5c9fbce3-a5f8-46d3-8e3f-c9bbc72588ea (terminated post-audit)
+- Orchestrator: c23e947b-4b79-4b4e-8a3f-89e48acc0ccb (terminated post-audit)
+- Victory Auditor: ceada641-02eb-444a-b881-bd4a0f57060a (terminated post-audit)
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -15,14 +15,17 @@ Coordinate and monitor OpenKey Win32 Macro table code sync bugfix workflow.
 - You MUST NOT write code, analyze problems, or make any technical decisions. Keep context ultra-light.
 
 ## User Context
-- **Last user request**: Fix macro table code sync in OpenKey Win32 across all table switching mechanisms and rebuild OpenKey.exe with 3-agent decomposition.
+- **Last user request**: Convert Macro mechanism in OpenKey Win32 to On-demand / Lazy Conversion (JIT), remove macroContentCode pre-compilation, make table switching O(1), build OpenKey.exe, test across Unicode/TCVN3/VNI, document results with 3 agents.
 - **Pending clarifications**: none
 - **Delivered results**:
-  - OpenKey.exe compiled cleanly with zero errors
-  - onTableCodeChange() integrated into AppDelegate::onTableCode() and AppDelegate::onDefaultConfig()
-  - MainControlDialog combobox standardized to call AppDelegate::onTableCode()
-  - Full technical documentation DOCS_MACRO_TABLECODE_SYNC.md created
-  - VICTORY CONFIRMED independent audit verdict
+  - `MacroData` simplified, `macroContentCode` removed from RAM.
+  - Startup `initMacroMap` and `addMacro` pre-translation removed.
+  - On-demand JIT conversion implemented in `findMacro()` supporting active `vCodeTable` and `vAutoCapsMacro`.
+  - `onTableCodeChange()` reduced to $O(1)$ zero-CPU operation.
+  - `OpenKey.exe` compiled cleanly with 0 errors (1,475,584 bytes).
+  - All test suites passed 100% (14/14 suite + 5/5 auditor tests).
+  - Complete documentation delivered in `DOCS_LAZY_MACRO_CONVERSION.md`.
+  - Independent Victory Audit confirmed (`VICTORY CONFIRMED`).
 
 ## Project Status
 - **Phase**: complete
@@ -36,8 +39,9 @@ Coordinate and monitor OpenKey Win32 Macro table code sync bugfix workflow.
 
 ## Artifact Index
 - C:\Users\Administrator\Desktop\OpenKey\.agents\teamwork\ORIGINAL_REQUEST.md — Verbatim user request record
+- C:\Users\Administrator\Desktop\OpenKey\.agents\teamwork\sentinel\BRIEFING.md — Sentinel persistent memory
 - C:\Users\Administrator\Desktop\OpenKey\OpenKey.exe — Compiled binary
-- C:\Users\Administrator\Desktop\OpenKey\DOCS_MACRO_TABLECODE_SYNC.md — Detailed technical documentation
-- C:\Users\Administrator\Desktop\OpenKey\DOCS_AUTO_ENCODING_AND_HOTKEY.md — Hotkey & auto-encoding documentation
-- C:\Users\Administrator\Desktop\OpenKey\.agents\teamwork\auditor\handoff.md — Victory Auditor report
+- C:\Users\Administrator\Desktop\OpenKey\DOCS_LAZY_MACRO_CONVERSION.md — Technical documentation
+- C:\Users\Administrator\Desktop\OpenKey\.agents\teamwork\orchestrator_2\handoff.md — Orchestrator handoff report
+- C:\Users\Administrator\Desktop\OpenKey\.agents\teamwork\auditor_2\handoff.md — Victory Auditor report
 - C:\Users\Administrator\Desktop\OpenKey\.agents\teamwork\sentinel\handoff.md — Sentinel handoff report

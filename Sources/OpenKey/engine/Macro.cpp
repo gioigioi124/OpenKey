@@ -103,7 +103,6 @@ void initMacroMap(const Byte* pData, const int& size) {
         
         vector<Uint32> key;
         convert(macroText, key);
-        convert(macroContent, data.macroContentCode);
         
         macroMap[key] = data;
     }
@@ -156,10 +155,9 @@ bool findMacro(vector<Uint32>& key, vector<Uint32>& macroContentCode) {
     for (c = 0; c < key.size(); c++) {
         key[c] = getCharacterCode(key[c]);
     }
-    if (macroMap.find(key) != macroMap.end()) {
-        macroContentCode.clear();
-        MacroData data = macroMap[key];
-        macroContentCode = data.macroContentCode;
+    std::map<vector<Uint32>, MacroData>::iterator it = macroMap.find(key);
+    if (it != macroMap.end()) {
+        convert(it->second.macroContent, macroContentCode);
         return true;
     }
     if (vAutoCapsMacro) {
@@ -172,10 +170,9 @@ bool findMacro(vector<Uint32>& key, vector<Uint32>& macroContentCode) {
         }
         
         if (key.size() > 0 && modifyCaseUnicode(key[0], false)) {
-            if (macroMap.find(key) != macroMap.end()) {
-                macroContentCode.clear();
-                MacroData data = macroMap[key];
-                macroContentCode = data.macroContentCode;
+            std::map<vector<Uint32>, MacroData>::iterator itCaps = macroMap.find(key);
+            if (itCaps != macroMap.end()) {
+                convert(itCaps->second.macroContent, macroContentCode);
                 for (c = 0; c < macroContentCode.size(); c++) {
                     if (c == 0 || _macroFlag) {
                         _kChar = keyCodeToCharacter(macroContentCode[c]);
@@ -220,11 +217,9 @@ bool addMacro(const string& macroText, const string& macroContent) {
         MacroData data;
         data.macroText = macroText;
         data.macroContent = macroContent;
-        convert(macroContent, data.macroContentCode);
         macroMap[key] = data;
     } else { //edit this macro
         macroMap[key].macroContent = macroContent;
-        convert(macroContent, macroMap[key].macroContentCode);
     }
     return true;
 }
@@ -240,9 +235,8 @@ bool deleteMacro(const string& macroText) {
 }
 
 void onTableCodeChange() {
-    for (std::map<vector<Uint32>, MacroData>::iterator it = macroMap.begin(); it != macroMap.end(); ++it) {
-        convert(it->second.macroContent, it->second.macroContentCode);
-    }
+    // On-demand JIT conversion: conversion is performed dynamically in findMacro().
+    // Table code switching is an O(1) operation with 0% CPU overhead.
 }
 
 void saveToFile(const string& path) {

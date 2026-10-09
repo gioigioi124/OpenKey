@@ -1,34 +1,31 @@
-# Handoff Report — Project Sentinel
+# Handoff Report: Sentinel Supervision of OpenKey Win32 Lazy JIT Macro Conversion
 
-## Observation
-User requested fixing the OpenKey Win32 Macro table code synchronization issue when changing character encodings/tables (via Hotkeys Ctrl+Shift+F1/F2, System Tray menu, Main Control Dialog combobox, ProcessRuleHelper auto-switching, and Fallback to Unicode).
-The user required a 3-agent decomposition:
-- Agent 1: Clarify root cause, explore codebase, and establish remediation plan.
-- Agent 2: Developer writing code and compiling OpenKey.exe.
-- Agent 3: Reviewer/Critic/Synthesizer validating changes, checking edge cases, and generating technical documentation.
+## 1. Observation
+- **User Request**: Convert OpenKey Win32 Macro mechanism to On-Demand / Lazy JIT Conversion, eliminate `macroContentCode` pre-compilation in RAM, optimize table code switching to $O(1)$ 0% CPU, build `OpenKey.exe`, verify across encodings (Unicode, TCVN3, VNI), and generate technical documentation via 3 agents.
+- **Execution Workflow**:
+  - Dispatched `teamwork_preview_orchestrator` (`c23e947b-4b79-4b4e-8a3f-89e48acc0ccb`).
+  - Monitored via Cron 1 (Progress) and Cron 2 (Liveness).
+  - Orchestrator coordinated:
+    - Agent 1 (`f3f58341-2bb8-4be8-8bd1-8cb4682cc313`): Architecture and test design.
+    - Agent 2 (`ee32ac4d-a5b7-40b3-871e-12b3788f81c5`): C++ implementation (`Macro.h`, `Macro.cpp`) and `build.bat`.
+    - Agent 3 (`4e46048a-a53c-4a31-b825-50280eb4c759`): 14/14 test pass, benchmarks, and `DOCS_LAZY_MACRO_CONVERSION.md`.
+  - Dispatched independent `teamwork_preview_victory_auditor` (`ceada641-02eb-444a-b881-bd4a0f57060a`).
+  - Victory Auditor Verdict: **VICTORY CONFIRMED**.
+  - All background tasks and subagents cleanly terminated.
 
-Project Orchestrator was dispatched, which sequentially coordinated:
-- Agent 1 (`342c9f2f-de64-469f-8409-7eadcb069137`): Located missing `onTableCodeChange()` calls on Win32, formulated remediation plan and test matrix (TC-01..TC-09).
-- Agent 2 (`5d9b08c4-6969-43cc-9bab-39e6c8ca900c`): Updated `AppDelegate.cpp` (`AppDelegate::onTableCode`, `AppDelegate::onDefaultConfig`) and `MainControlDialog.cpp`, executed `build.bat` with Exit Code 0, producing `OpenKey.exe` (1,477,120 bytes).
-- Agent 3 (`b9c4b772-54e3-48a7-afd6-eb5fe2d4b89c`): Conducted integrity forensics (no facades/cheats), stress tested zero-lag and reentrancy safety, verified all 9 test cases, and authored `DOCS_MACRO_TABLECODE_SYNC.md`.
-Victory Auditor (`5c9fbce3-a5f8-46d3-8e3f-c9bbc72588ea`) performed an independent 3-phase audit and issued a `VICTORY CONFIRMED` verdict.
+## 2. Logic Chain
+1. **R1 (On-Demand JIT Conversion)**: `findMacro()` performs dynamic conversion of matched macro string directly to key events for active `vCodeTable` upon trigger. Supports `vAutoCapsMacro` with proper case conversion.
+2. **R2 (RAM Optimization & $O(1)$ Switching)**: `MacroData` simplified to 48 bytes (eliminated `vector<Uint32> macroContentCode`). Removed pre-conversion in `initMacroMap()` and `addMacro()`. `onTableCodeChange()` simplified to an $O(1)$ no-op (100 ns execution, 0% CPU overhead).
+3. **R3 (Build & Documentation)**: `OpenKey.exe` compiled cleanly via `build.bat` with exit code 0. Comprehensive technical documentation produced at `DOCS_LAZY_MACRO_CONVERSION.md`.
+4. **Independent Audit**: Confirmed zero cheating, zero facade, 100% tests passed across suites (14/14 and 5/5 auditor tests).
 
-## Logic Chain
-1. Request parsed and routed to General SWE path via `teamwork_preview_orchestrator`.
-2. Monitoring crons established for progress reporting (`*/8 * * * *`) and liveness checking (`*/10 * * * *`).
-3. Implementation completed by 3-agent team with clean separation of duties.
-4. Independent Victory Auditor dispatched with zero shared context, verifying timeline, integrity, and building `OpenKey.exe` directly via `cmd /c build.bat`.
-5. Verdict returned `VICTORY CONFIRMED`.
-6. Monitoring crons cancelled and subagents cleaned up via `kill_all`.
+## 3. Caveats
+- None. Binary is fully backward compatible, all existing hotkeys and rules remain intact.
 
-## Caveats
-- `OpenKey.exe` was built in Release mode with MSVC 2017/2019/BuildTools environment.
-- Macro data in `macroContentCode` is kept in RAM and synchronized dynamically; modifying macros in MacroDialog continues to reload and synchronize correctly with the active table code.
+## 4. Conclusion
+All acceptance criteria met with confirmed independent post-victory verification. Project ready for delivery.
 
-## Conclusion
-All requirements R1, R2, R3 and acceptance criteria have been fully met and independently confirmed. The binary `OpenKey.exe` is compiled and ready for deployment.
-
-## Verification Method
-- Independent build execution: `cmd /c build.bat` -> Exit code 0, binary output verified (1,477,120 bytes, SHA256: `A4C9643E96C79708344E83F4C0916325E1B72E7629FD1046159AF8FCE31436C2`).
-- Integrity check: Verified `onTableCodeChange()` executes real code table conversion in RAM; `AppDelegate::onTableCode()` serves as Single Source of Truth for all 6 table code switching mechanisms.
-- Comprehensive technical documentation delivered in `DOCS_MACRO_TABLECODE_SYNC.md`.
+## 5. Verification Method
+- Build: `cmd.exe /c build.bat` (Exit code 0).
+- Test suite: `tests\test_lazy_macro.exe` (14/14 PASSED).
+- Independent auditor suite: `tests\test_auditor_independent.exe` (5/5 PASSED).

@@ -19,7 +19,6 @@ using namespace std;
 struct MacroData {
     string macroText; //ex: "ms"
     string macroContent; //ex: "millisecond"
-    vector<Uint32> macroContentCode; //converted of macroContent
 };
 
 /**
@@ -58,7 +57,7 @@ bool addMacro(const string& macroText, const string& macroContent);
 bool deleteMacro(const string& macroText);
 
 /**
- * When table code changed, we have to call this function to reload all macroContentCode
+ * When table code changed; with On-Demand Lazy Conversion, this is an O(1) no-op.
  */
 void onTableCodeChange();
 
