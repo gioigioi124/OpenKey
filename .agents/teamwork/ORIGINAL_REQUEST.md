@@ -80,3 +80,46 @@ Phân rã nhiệm vụ cho 3 Agents: Agent 1 lên kế hoạch, Agent 2 viết c
 ### Biên dịch & Tài liệu
 - [ ] Biên dịch ra `OpenKey.exe` thành công 100% không có lỗi.
 - [ ] Lưu lại báo cáo tiến trình và tài liệu kỹ thuật chi tiết vào tệp Markdown trong dự án.
+
+
+## 2026-10-10T02:05:02Z
+
+Phân rã nhiệm vụ cho 3 Agents: Agent 1 hỏi lại tôi để làm rõ vấn đề rồi lên kế hoạch, Agent 2 viết code, Agent 3 kiểm tra, phản biện và ghi vào file md đã có.
+
+Tự động kiểm tra tiêu đề/tiến trình của cửa sổ cha (Parent / Owner Window) trước khi chuyển đổi bảng mã hoặc fallback về Unicode khi mở UserForm hoặc hộp thoại con (áp dụng cho Excel và tổng quát các ứng dụng) trong OpenKey Win32.
+
+Working directory: c:\Users\03102025\Desktop\OpenKey
+Integrity mode: development
+
+## Requirements
+
+### R1. Truy vết cửa sổ cha (Parent / Root Owner Window) khi kích hoạt UserForm / Hộp thoại con
+- Khi nhận sự kiện chuyển đổi cửa sổ (`EVENT_SYSTEM_FOREGROUND`) hoặc đổi tiêu đề (`EVENT_OBJECT_NAMECHANGE`), nếu cửa sổ hiện tại (foreground window) là UserForm, dialog hoặc popup thuộc cùng tiến trình (như Excel `excel.exe`, Word, v.v.):
+  1. Trước hết kiểm tra tiêu đề của chính cửa sổ đó theo các quy tắc trong `process_rules.ini`.
+  2. Nếu tiêu đề hiện tại KHÔNG khớp bất kỳ quy tắc nào: tự động truy vết cửa sổ sở hữu/cửa sổ cha (`GA_ROOTOWNER` / `GW_OWNER`) thuộc cùng tiến trình để lấy tiêu đề của tệp/ứng dụng cha.
+  3. Nếu cửa sổ cha khớp quy tắc trong `process_rules.ini`, áp dụng ngay bảng mã của cửa sổ cha cho cửa sổ con.
+  4. Chỉ kích hoạt cơ chế fallback về Unicode (khi `fallback_to_unicode = 1`) nếu cả cửa sổ hiện tại và cửa sổ cha đều không khớp quy tắc nào.
+- Áp dụng cơ chế tổng quát cho tất cả các phần mềm có hộp thoại con/popup cùng tiến trình (Excel, Word, CAD, phần mềm kế toán...), tránh bị gián đoạn hoặc nhảy sai bảng mã khi tương tác với UserForm.
+
+### R2. Tối ưu hiệu năng và Tuân thủ kiến trúc OpenKey Win32
+- Đảm bảo việc truy vết cửa sổ cha diễn ra an toàn (kiểm tra `HWND` hợp lệ, cùng Process ID, tránh vòng lặp vô hạn hay rò rỉ handle).
+- Duy trì độ trễ xử lý ở mức tối thiểu, không làm ảnh hưởng đến luồng hook bàn phím (`keyboardHookProcess`) hay tốc độ phản hồi gõ phím.
+- Đồng bộ chuyển bảng mã tập trung qua `AppDelegate::getInstance()->onTableCode(ruleCode)` và cập nhật giao diện khay hệ thống (`SystemTrayHelper::updateData()`) theo chuẩn Single Source of Truth.
+
+### R3. Phân nhiệm 3 Agents, Kiểm thử và Cập nhật Tài liệu
+- **Agent 1 (Làm rõ & Lập kế hoạch)**: Phân tích sâu mã nguồn (`OpenKeyHelper.cpp`, `OpenKey.cpp`, `ProcessRuleHelper.cpp`), xác định các API Win32 phù hợp (`GetAncestor`, `GetWindow`, `GetWindowThreadProcessId`), thiết kế giải pháp kỹ thuật và xây dựng ma trận kịch bản kiểm thử (Test Matrix) chi tiết.
+- **Agent 2 (Kỹ sư Lập trình)**: Triển khai mã nguồn C++ trên nền OpenKey Win32, bổ sung hàm lấy tiêu đề có tính đến cửa sổ cha, tích hợp vào `winEventProcCallback`.
+- **Agent 3 (Phản biện, Kiểm tra & Tổng hợp)**: Phản biện độc lập các trường hợp biên (modal dialog, modeless UserForm, đóng mở liên tục, cửa sổ không tiêu đề, switch qua lại giữa các file Excel khác nhau); kiểm tra mã nguồn không có cheat/hardcode; tổng hợp toàn bộ kết quả, phân tích kỹ thuật và cập nhật vào `DOCS_AUTO_ENCODING_AND_HOTKEY.md` đồng thời ghi tóm tắt vào `CHANGELOG.md`.
+
+## Acceptance Criteria
+
+### Tính chính xác khi mở UserForm trong Excel & các ứng dụng
+- [ ] Khi đang mở file Excel có quy tắc bảng mã (ví dụ `excel.exe[a] = TCVN3` hoặc `excel.exe[Tong hop ban hang - Date] = TCVN3`): mở UserForm lên (tiêu đề `"UserForm1"` hoặc tương tự) thì bảng mã vẫn giữ nguyên TCVN3, không bị fallback về Unicode.
+- [ ] Gõ tiếng Việt trong UserForm xuất ra đúng ký tự tiếng Việt của bảng mã cha đã cấu hình (TCVN3).
+- [ ] Khi đóng UserForm hoặc click trở lại bảng tính Excel, bảng mã vẫn duy trì chính xác.
+- [ ] Nếu một UserForm/Dialog có quy tắc cấu hình riêng trong `process_rules.ini`, quy tắc riêng của cửa sổ đó vẫn được ưu tiên áp dụng.
+- [ ] Khi chuyển sang ứng dụng hoàn toàn khác ngoài danh sách (ví dụ Notepad, Chrome) với `fallback_to_unicode = 1`, OpenKey tự động fallback về Unicode đúng như thiết kế.
+
+### Tính toàn vẹn & Tài liệu
+- [ ] Không gây ảnh hưởng hay lỗi hồi quy (regression) tới các tính năng hiện tại: phím tắt `Ctrl + Shift + F1/F2/F12`, Tray menu, cơ chế Macro JIT On-Demand.
+- [ ] Hoàn thiện cập nhật tài liệu kỹ thuật tại `DOCS_AUTO_ENCODING_AND_HOTKEY.md` và `CHANGELOG.md`.

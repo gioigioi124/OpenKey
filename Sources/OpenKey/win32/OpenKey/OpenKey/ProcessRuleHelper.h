@@ -29,6 +29,8 @@ public:
     static void init();
     static void reloadRules();
     static int getCodeTableForProcessAndTitle(const std::string& exeName, const std::string& windowTitle);
+    static int getCodeTableForTitleOnly(const std::string& exeName, const std::string& windowTitle);
+    static int getCodeTableForWindow(HWND hwnd, const std::string& exeName);
     static int getCodeTableForProcess(const std::string& exeName);
     static std::wstring getCodeTableName(int code);
 };

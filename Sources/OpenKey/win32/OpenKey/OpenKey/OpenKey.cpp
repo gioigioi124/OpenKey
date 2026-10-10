@@ -42,6 +42,7 @@ static HHOOK hKeyboardHook;
 static HHOOK hMouseHook;
 static HWINEVENTHOOK hSystemEvent;
 static HWINEVENTHOOK hTitleEvent;
+static HWINEVENTHOOK hFocusEvent;
 static KBDLLHOOKSTRUCT* keyboardData;
 static MSLLHOOKSTRUCT* mouseData;
 static vKeyHookState* pData;
@@ -79,6 +80,10 @@ void OpenKeyFree() {
 	if (hTitleEvent) {
 		UnhookWinEvent(hTitleEvent);
 		hTitleEvent = NULL;
+	}
+	if (hFocusEvent) {
+		UnhookWinEvent(hFocusEvent);
+		hFocusEvent = NULL;
 	}
 }
 
@@ -178,6 +183,7 @@ void OpenKeyInit() {
 	hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseHookProcess, hInstance, 0);
 	hSystemEvent = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 	hTitleEvent = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+	hFocusEvent = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 }
 
 void saveSmartSwitchKeyData() {
@@ -718,14 +724,21 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 			return;
 	}
 
+	if (dwEvent == EVENT_OBJECT_FOCUS) {
+		startNewSession();
+		return;
+	}
+
 	string& exe = OpenKeyHelper::getFrontMostAppExecuteName();
 	if (exe.compare("explorer.exe") == 0) //dont apply with windows explorer
 		return;
 
 	// 1. Process & Title recognition rule (only active when not locked)
 	if (vAutoSwitchCodeTable) {
-		string title = OpenKeyHelper::getFrontMostWindowTitleUtf8();
-		int ruleCode = ProcessRuleHelper::getCodeTableForProcessAndTitle(exe, title);
+		HWND hActiveWnd = GetForegroundWindow();
+		if (!hActiveWnd && hwnd) hActiveWnd = hwnd;
+
+		int ruleCode = ProcessRuleHelper::getCodeTableForWindow(hActiveWnd, exe);
 		if (ruleCode != -1) {
 			if (vCodeTable != ruleCode) {
 				AppDelegate::getInstance()->onTableCode(ruleCode);

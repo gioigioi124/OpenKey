@@ -35,6 +35,8 @@ public:
 	static string& getFrontMostAppExecuteName();
 	static string& getLastAppExecuteName();
 	static string getFrontMostWindowTitleUtf8();
+	static string getWindowTitleUtf8(HWND hwnd);
+	static HWND getProcessRootOwner(HWND hwnd);
 
 	static wstring getFullPath();
 

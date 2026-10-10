@@ -227,8 +227,8 @@ void ProcessRuleHelper::reloadRules() {
     inFile.close();
 }
 
-int ProcessRuleHelper::getCodeTableForProcessAndTitle(const std::string& exeName, const std::string& windowTitle) {
-    if (!vAutoSwitchCodeTable) {
+int ProcessRuleHelper::getCodeTableForTitleOnly(const std::string& exeName, const std::string& windowTitle) {
+    if (!vAutoSwitchCodeTable || windowTitle.empty()) {
         return -1;
     }
     if (!_isInitialized) {
@@ -255,6 +255,17 @@ int ProcessRuleHelper::getCodeTableForProcessAndTitle(const std::string& exeName
         }
     }
 
+    return -1;
+}
+
+int ProcessRuleHelper::getCodeTableForProcess(const std::string& exeName) {
+    if (!vAutoSwitchCodeTable || exeName.empty()) {
+        return -1;
+    }
+    if (!_isInitialized) {
+        init();
+    }
+    std::string lowerExe = toLower(exeName);
     // Pass 3: Rules matching processName only (titlePattern is empty)
     for (const auto& item : _ruleItems) {
         if (!item.processName.empty() && item.titlePattern.empty()) {
@@ -263,12 +274,71 @@ int ProcessRuleHelper::getCodeTableForProcessAndTitle(const std::string& exeName
             }
         }
     }
-
-    return -1; // No match -> Keep current code table!
+    return -1;
 }
 
-int ProcessRuleHelper::getCodeTableForProcess(const std::string& exeName) {
-    return getCodeTableForProcessAndTitle(exeName, "");
+int ProcessRuleHelper::getCodeTableForProcessAndTitle(const std::string& exeName, const std::string& windowTitle) {
+    int code = getCodeTableForTitleOnly(exeName, windowTitle);
+    if (code != -1) return code;
+    return getCodeTableForProcess(exeName);
+}
+
+int ProcessRuleHelper::getCodeTableForWindow(HWND hwnd, const std::string& exeName) {
+    if (!vAutoSwitchCodeTable || !hwnd || !IsWindow(hwnd)) {
+        return -1;
+    }
+
+    // Priority 1: Check child window title against title rules
+    std::string childTitle = OpenKeyHelper::getWindowTitleUtf8(hwnd);
+    if (!childTitle.empty()) {
+        int childCode = getCodeTableForTitleOnly(exeName, childTitle);
+        if (childCode != -1) {
+            return childCode;
+        }
+    }
+
+    // Priority 2: If child title has no rule match, find parent/root owner window
+    DWORD targetPid = 0;
+    GetWindowThreadProcessId(hwnd, &targetPid);
+    if (targetPid != 0) {
+        // Priority 2a: Check immediate owner / parent window
+        HWND hOwner = GetWindow(hwnd, GW_OWNER);
+        if (!hOwner) {
+            hOwner = GetParent(hwnd);
+        }
+        if (hOwner && IsWindow(hOwner) && hOwner != hwnd && hOwner != GetDesktopWindow()) {
+            DWORD ownerPid = 0;
+            GetWindowThreadProcessId(hOwner, &ownerPid);
+            if (ownerPid == targetPid) {
+                std::string ownerTitle = OpenKeyHelper::getWindowTitleUtf8(hOwner);
+                if (!ownerTitle.empty()) {
+                    int ownerCode = getCodeTableForTitleOnly(exeName, ownerTitle);
+                    if (ownerCode != -1) {
+                        return ownerCode;
+                    }
+                }
+            }
+        }
+
+        // Priority 2b: Check root owner window (GA_ROOTOWNER)
+        HWND hRootOwner = OpenKeyHelper::getProcessRootOwner(hwnd);
+        if (hRootOwner && IsWindow(hRootOwner) && hRootOwner != hwnd && hRootOwner != hOwner && hRootOwner != GetDesktopWindow()) {
+            DWORD rootPid = 0;
+            GetWindowThreadProcessId(hRootOwner, &rootPid);
+            if (rootPid == targetPid) {
+                std::string rootTitle = OpenKeyHelper::getWindowTitleUtf8(hRootOwner);
+                if (!rootTitle.empty()) {
+                    int rootCode = getCodeTableForTitleOnly(exeName, rootTitle);
+                    if (rootCode != -1) {
+                        return rootCode;
+                    }
+                }
+            }
+        }
+    }
+
+    // Priority 3: If neither child nor parent matches title rules, check process-level rules (Pass 3)
+    return getCodeTableForProcess(exeName);
 }
 
 std::wstring ProcessRuleHelper::getCodeTableName(int code) {

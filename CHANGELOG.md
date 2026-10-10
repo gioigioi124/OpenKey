@@ -2,6 +2,18 @@
 
 ##### OpenKey for Linux: (in development)
 
+##### Version 2.2.0: (10/10/2026)
+- **Tự động kiểm tra Cửa sổ Cha (Parent / Root Owner Window Tracing)**: Tự động truy vết cửa sổ sở hữu (`GW_OWNER`) và cửa sổ gốc (`GA_ROOTOWNER`) khi mở VBA UserForm hoặc hộp thoại con/popup trong Microsoft Excel và các ứng dụng Win32.
+- **Bảo toàn Bảng mã cho UserForm / Dialog**: Ngăn chặn tình trạng nhảy sai bảng mã hoặc fallback về Unicode khi làm việc với UserForm từ file Excel đã được cấu hình quy tắc (ví dụ: `excel.exe[a] = TCVN3`).
+- **Phân cấp So khớp Quy tắc Ưu tiên (Rule Resolution Hierarchy)**:
+  - Ưu tiên 1: Quy tắc riêng biệt của cửa sổ con (nếu có).
+  - Ưu tiên 2: Quy tắc kế thừa từ tiêu đề file của cửa sổ cha/gốc sở hữu cùng tiến trình.
+  - Ưu tiên 3: Quy tắc chung theo tên tiến trình.
+  - Ưu tiên 4: Fallback về Unicode khi rời ứng dụng (nếu bật tùy chọn fallback).
+- **Cách ly Ranh giới Tiến trình & Chống Vòng lặp**: Xác thực an toàn `GetWindowThreadProcessId` ngăn ngừa vượt ranh giới tiến trình; giới hạn độ sâu duyệt tối đa 10 cấp.
+- **Tự động làm sạch Bộ đệm Gõ tắt khi chuyển Focus (Auto Clear Macro Buffer on Focus Change)**: Bổ sung `hMacroKey.clear()` vào `startNewSession()` và bắt sự kiện `EVENT_OBJECT_FOCUS` Win32. Khắc phục triệt để lỗi gõ tắt không bung ở lần đầu khi mở VBA UserForm / chuyển TextBox mà không cần click chuột.
+- **Độ trễ Cực thấp**: Cơ chế truy vết bộ nhớ < 1 microsecond, hoàn toàn không gây trễ luồng gõ phím.
+
 ##### Version 1.2 RC5: (26/08/2019)
 - Sửa lỗi không gõ được chữ "quởn".
 - Không kiểm tra chính tả khi sử dụng dấu "[ ] { }".

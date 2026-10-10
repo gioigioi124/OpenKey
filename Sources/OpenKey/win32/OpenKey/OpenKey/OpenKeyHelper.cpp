@@ -155,17 +155,61 @@ string & OpenKeyHelper::getLastAppExecuteName() {
 	return _exeNameUtf8;
 }
 
-string OpenKeyHelper::getFrontMostWindowTitleUtf8() {
-	HWND hForeground = GetForegroundWindow();
-	if (!hForeground) return "";
+string OpenKeyHelper::getWindowTitleUtf8(HWND hwnd) {
+	if (!hwnd || !IsWindow(hwnd)) return "";
 	WCHAR titleBuf[1024] = { 0 };
-	int len = GetWindowTextW(hForeground, titleBuf, 1024);
+	int len = GetWindowTextW(hwnd, titleBuf, 1024);
 	if (len <= 0) return "";
 	int size_needed = WideCharToMultiByte(CP_UTF8, 0, titleBuf, len, NULL, 0, NULL, NULL);
 	if (size_needed <= 0) return "";
 	std::string strTo(size_needed, 0);
 	WideCharToMultiByte(CP_UTF8, 0, titleBuf, len, &strTo[0], size_needed, NULL, NULL);
 	return strTo;
+}
+
+string OpenKeyHelper::getFrontMostWindowTitleUtf8() {
+	return getWindowTitleUtf8(GetForegroundWindow());
+}
+
+HWND OpenKeyHelper::getProcessRootOwner(HWND hwnd) {
+	if (!hwnd || !IsWindow(hwnd)) return NULL;
+
+	DWORD targetPid = 0;
+	GetWindowThreadProcessId(hwnd, &targetPid);
+	if (targetPid == 0) return NULL;
+
+	// Priority 1: Check GA_ROOTOWNER traversing both parent and owner chain
+	HWND hRoot = GetAncestor(hwnd, GA_ROOTOWNER);
+	if (hRoot && IsWindow(hRoot) && hRoot != hwnd && hRoot != GetDesktopWindow()) {
+		DWORD rootPid = 0;
+		GetWindowThreadProcessId(hRoot, &rootPid);
+		if (rootPid == targetPid) {
+			return hRoot;
+		}
+	}
+
+	// Priority 2: Safely step through GW_OWNER / GetParent within same PID (max 10 steps)
+	HWND cur = hwnd;
+	int depth = 0;
+	HWND bestOwner = NULL;
+	while (cur && depth++ < 10) {
+		HWND next = GetWindow(cur, GW_OWNER);
+		if (!next) {
+			next = GetParent(cur);
+		}
+		if (!next || next == cur || !IsWindow(next) || next == GetDesktopWindow()) {
+			break;
+		}
+		DWORD nextPid = 0;
+		GetWindowThreadProcessId(next, &nextPid);
+		if (nextPid != targetPid) {
+			break; // Stop at cross-process boundary
+		}
+		bestOwner = next;
+		cur = next;
+	}
+
+	return bestOwner;
 }
 
 wstring OpenKeyHelper::getFullPath() {
