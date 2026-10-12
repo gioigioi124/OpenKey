@@ -23,6 +23,7 @@ redistribute your new version, it MUST be open source.
 #define POPUP_USE_MACRO 903
 #define POPUP_AUTO_SWITCH_CODETABLE 904
 #define POPUP_FALLBACK_UNICODE 905
+#define POPUP_RELOAD_RULES 906
 
 #define POPUP_TELEX 910
 #define POPUP_VNI 911
@@ -61,6 +62,7 @@ map<UINT, LPCTSTR> menuData = {
 	{POPUP_USE_MACRO, _T("Bật gõ tắt")},
 	{POPUP_AUTO_SWITCH_CODETABLE, _T("Tự động chuyển bảng mã theo ứng dụng")},
 	{POPUP_FALLBACK_UNICODE, _T("Fallback về Unicode khi rời ứng dụng")},
+	{POPUP_RELOAD_RULES, _T("Nạp lại quy tắc (process_rules.ini)")},
 	{POPUP_TELEX, _T("Kiểu gõ Telex")},
 	{POPUP_VNI, _T("Kiểu gõ VNI")},
 	{POPUP_SIMPLE_TELEX, _T("Kiểu gõ Simple Telex")},
@@ -125,6 +127,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 				break;
 			case POPUP_FALLBACK_UNICODE:
 				AppDelegate::getInstance()->onToggleFallbackToUnicode();
+				break;
+			case POPUP_RELOAD_RULES:
+				AppDelegate::getInstance()->onReloadProcessRules();
 				break;
 			case POPUP_MACRO_TABLE:
 				AppDelegate::getInstance()->onMacroTable();
@@ -218,6 +223,7 @@ void SystemTrayHelper::createPopupMenu() {
 	AppendMenu(popupMenu, MF_CHECKED, POPUP_USE_MACRO, menuData[POPUP_USE_MACRO]);
 	AppendMenu(popupMenu, MF_CHECKED, POPUP_AUTO_SWITCH_CODETABLE, menuData[POPUP_AUTO_SWITCH_CODETABLE]);
 	AppendMenu(popupMenu, MF_UNCHECKED, POPUP_FALLBACK_UNICODE, menuData[POPUP_FALLBACK_UNICODE]);
+	AppendMenu(popupMenu, MF_UNCHECKED, POPUP_RELOAD_RULES, menuData[POPUP_RELOAD_RULES]);
 	AppendMenu(popupMenu, MF_SEPARATOR, 0, 0);
 	AppendMenu(popupMenu, MF_UNCHECKED, POPUP_MACRO_TABLE, menuData[POPUP_MACRO_TABLE]);
 	AppendMenu(popupMenu, MF_UNCHECKED, POPUP_CONVERT_TOOL, menuData[POPUP_CONVERT_TOOL]);
@@ -382,6 +388,7 @@ void SystemTrayHelper::removeSystemTray() {
 
 void SystemTrayHelper::showNotification(LPCTSTR title, LPCTSTR message) {
 	if (nid.hWnd == NULL) return;
+	DWORD savedFlags = nid.uFlags;
 	nid.uFlags |= NIF_INFO;
 	if (title != NULL) {
 		wcsncpy_s(nid.szInfoTitle, title, _countof(nid.szInfoTitle));
@@ -395,4 +402,7 @@ void SystemTrayHelper::showNotification(LPCTSTR title, LPCTSTR message) {
 	}
 	nid.dwInfoFlags = NIIF_INFO;
 	Shell_NotifyIcon(NIM_MODIFY, &nid);
-}
+	// Restore flags so subsequent NIM_MODIFY calls (e.g. updateData) do not
+	// re-trigger the balloon with stale info.
+	nid.uFlags = savedFlags;
+}

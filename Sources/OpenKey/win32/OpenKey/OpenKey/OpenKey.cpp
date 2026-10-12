@@ -528,12 +528,18 @@ LRESULT CALLBACK keyboardHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 
 	//switch language shortcut; convert hotkey
 	if ((wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && !_isFlagKey && _keycode != 0) {
-		// Hotkeys: Ctrl + Shift + F1 (Unicode), Ctrl + Shift + F2 (TCVN3)
-		if ((_flag & MASK_CONTROL) && (_flag & MASK_SHIFT) && !(_flag & MASK_ALT) && !(_flag & MASK_WIN)) {
+		// Hotkeys: Ctrl + Shift + F1 (Unicode), Ctrl + Shift + F2 (TCVN3), Ctrl + Shift + F12 (lock)
+		// Guard: skip if the key is already bound to the user-configured switch key or
+		// convert-tool hotkey, so the user's own binding always takes precedence.
+		bool _conflictsWithUserHotkey =
+			(GET_SWITCH_KEY(vSwitchKeyStatus) == _keycode) ||
+			(GET_SWITCH_KEY(convertToolHotKey) == _keycode);
+		if (!_conflictsWithUserHotkey &&
+			(_flag & MASK_CONTROL) && (_flag & MASK_SHIFT) && !(_flag & MASK_ALT) && !(_flag & MASK_WIN)) {
 			if (_keycode == VK_F1) {
 				AppDelegate::getInstance()->onTableCode(0);
-				SystemTrayHelper::updateData();
-				SystemTrayHelper::showNotification(_T("OpenKey"), _T("Bảng mã: Unicode"));
+				wstring _codeName = wstring(_T("Bảng mã: ")) + ProcessRuleHelper::getCodeTableName(0);
+				SystemTrayHelper::showNotification(_T("OpenKey"), _codeName.c_str());
 				if (HAS_BEEP(vSwitchKeyStatus)) {
 					MessageBeep(MB_OK);
 				}
@@ -542,8 +548,8 @@ LRESULT CALLBACK keyboardHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 				return -1;
 			} else if (_keycode == VK_F2) {
 				AppDelegate::getInstance()->onTableCode(1);
-				SystemTrayHelper::updateData();
-				SystemTrayHelper::showNotification(_T("OpenKey"), _T("Bảng mã: TCVN3 (ABC)"));
+				wstring _codeName = wstring(_T("Bảng mã: ")) + ProcessRuleHelper::getCodeTableName(1);
+				SystemTrayHelper::showNotification(_T("OpenKey"), _codeName.c_str());
 				if (HAS_BEEP(vSwitchKeyStatus)) {
 					MessageBeep(MB_OK);
 				}
@@ -713,22 +719,60 @@ LRESULT CALLBACK mouseHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
+	// Throttle EVENT_OBJECT_NAMECHANGE: window titles change very frequently
+	// (browsers, editors, clocks...). Only re-evaluate when the title actually
+	// changed and at most once every 250ms to avoid CPU churn and mid-typing
+	// code table flips.
+	static DWORD _lastTitleEventTime = 0;
+	static string _lastProcessedTitle = "";
+	static HWND _lastTitleHwnd = NULL;
+
 	if (dwEvent == EVENT_OBJECT_NAMECHANGE) {
 		if (idObject != OBJID_WINDOW || hwnd != GetForegroundWindow())
 			return;
+
+		DWORD now = GetTickCount();
+		if (now - _lastTitleEventTime < 250)
+			return;
+		_lastTitleEventTime = now;
+
+		string currentTitle = OpenKeyHelper::getFrontMostWindowTitleUtf8();
+		if (hwnd == _lastTitleHwnd && currentTitle == _lastProcessedTitle)
+			return;
+		_lastTitleHwnd = hwnd;
+		_lastProcessedTitle = currentTitle;
 	}
 
 	string& exe = OpenKeyHelper::getFrontMostAppExecuteName();
 	if (exe.compare("explorer.exe") == 0) //dont apply with windows explorer
 		return;
 
+	// Read the remembered input-method status for this app once (used by both
+	// the language smart-switch and the "remember table code" feature).
+	// -1 means this app has no remembered status yet.
+	if (dwEvent == EVENT_SYSTEM_FOREGROUND && vUseSmartSwitchKey) {
+		_languageTemp = getAppInputMethodStatus(exe, vLanguage | (vCodeTable << 1));
+	} else {
+		_languageTemp = -1;
+	}
+
 	// 1. Process & Title recognition rule (only active when not locked)
 	if (vAutoSwitchCodeTable) {
 		string title = OpenKeyHelper::getFrontMostWindowTitleUtf8();
 		int ruleCode = ProcessRuleHelper::getCodeTableForProcessAndTitle(exe, title);
 		if (ruleCode != -1) {
+			// Explicit rule wins.
 			if (vCodeTable != ruleCode) {
 				AppDelegate::getInstance()->onTableCode(ruleCode);
+				SystemTrayHelper::updateData();
+			}
+		} else if (vRememberCode && _languageTemp != -1) {
+			// No rule: restore the code table previously remembered for this app
+			// (unifies Auto-Switch with the Smart-Switch-Key "remember table code"
+			// feature, matching the macOS behavior).
+			int rememberedCode = (_languageTemp >> 1);
+			if (vCodeTable != rememberedCode) {
+				AppDelegate::getInstance()->onTableCode(rememberedCode);
 				SystemTrayHelper::updateData();
 			}
 		} else if (vFallbackToUnicode) {
@@ -737,12 +781,11 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 				SystemTrayHelper::updateData();
 			}
 		}
-		// If ruleCode == -1 and !vFallbackToUnicode, retain current encoding without fallback!
+		// If no rule, no remembered code and !vFallbackToUnicode -> retain current encoding.
 	}
 
-	// 2. Smart switch key (for Vietnamese/English language toggle only, NO code table fallback)
+	// 2. Smart switch key (for Vietnamese/English language toggle only)
 	if (dwEvent == EVENT_SYSTEM_FOREGROUND && vUseSmartSwitchKey) {
-		_languageTemp = getAppInputMethodStatus(exe, vLanguage | (vCodeTable << 1));
 		vTempOffEngine(false);
 		if ((_languageTemp & 0x01) != vLanguage) {
 			if (_languageTemp != -1) {

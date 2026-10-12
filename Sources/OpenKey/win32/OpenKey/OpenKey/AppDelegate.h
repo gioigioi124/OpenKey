@@ -42,6 +42,7 @@ public: //event
 	void onToggleUseMacro();
 	void onToggleAutoSwitchCodeTable();
 	void onToggleFallbackToUnicode();
+	void onReloadProcessRules();
 
 	void onMacroTable();
 	void onConvertTool();

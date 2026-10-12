@@ -244,6 +244,7 @@ void AppDelegate::onToggleUseMacro() {
 
 void AppDelegate::onToggleAutoSwitchCodeTable() {
 	APP_SET_DATA(vAutoSwitchCodeTable, vAutoSwitchCodeTable ? 0 : 1);
+	ProcessRuleHelper::updateIniSetting("enabled", vAutoSwitchCodeTable);
 	SystemTrayHelper::updateData();
 	if (vAutoSwitchCodeTable) {
 		SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã BẬT tự động chuyển bảng mã theo ứng dụng"));
@@ -254,12 +255,19 @@ void AppDelegate::onToggleAutoSwitchCodeTable() {
 
 void AppDelegate::onToggleFallbackToUnicode() {
 	APP_SET_DATA(vFallbackToUnicode, vFallbackToUnicode ? 0 : 1);
+	ProcessRuleHelper::updateIniSetting("fallback_to_unicode", vFallbackToUnicode);
 	SystemTrayHelper::updateData();
 	if (vFallbackToUnicode) {
 		SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã BẬT fallback về Unicode"));
 	} else {
 		SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã TẮT fallback về Unicode"));
 	}
+}
+
+void AppDelegate::onReloadProcessRules() {
+	ProcessRuleHelper::reloadRules();
+	SystemTrayHelper::updateData();
+	SystemTrayHelper::showNotification(_T("OpenKey"), _T("Đã nạp lại quy tắc từ process_rules.ini"));
 }
 
 void AppDelegate::onMacroTable() {

@@ -19,7 +19,7 @@ private:
     static std::wstring _iniFilePath;
 
     static std::string toLower(const std::string& str);
-    static bool isDelimiter(char c);
+    static bool isDelimiter(wchar_t c);
     static bool matchesTitle(const std::string& title, const std::string& pattern);
     static void initFilePath();
     static void loadDefaultRules();
@@ -28,6 +28,7 @@ private:
 public:
     static void init();
     static void reloadRules();
+    static void updateIniSetting(const std::string& key, int value);
     static int getCodeTableForProcessAndTitle(const std::string& exeName, const std::string& windowTitle);
     static int getCodeTableForProcess(const std::string& exeName);
     static std::wstring getCodeTableName(int code);

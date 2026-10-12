@@ -20,26 +20,39 @@ std::string ProcessRuleHelper::toLower(const std::string& str) {
     return result;
 }
 
-bool ProcessRuleHelper::isDelimiter(char c) {
+bool ProcessRuleHelper::isDelimiter(wchar_t c) {
     // Delimiters include space, dot, hyphen, underscore, brackets, quotes, etc.
-    return !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
+    // Operate on wide characters so multi-byte UTF-8 (Vietnamese) is handled correctly.
+    return !((c >= L'a' && c <= L'z') || (c >= L'0' && c <= L'9'));
 }
 
 bool ProcessRuleHelper::matchesTitle(const std::string& title, const std::string& pattern) {
     if (pattern.empty()) return true;
     if (title.empty()) return false;
 
-    std::string lowerTitle = toLower(title);
-    std::string lowerPattern = toLower(pattern);
+    // Convert to wide strings so word-boundary checks operate on code points,
+    // not raw UTF-8 bytes (which would mis-handle Vietnamese diacritics).
+    std::wstring wideTitle = utf8ToWideString(title);
+    std::wstring widePattern = utf8ToWideString(pattern);
+
+    // Lowercase (ASCII) for case-insensitive matching.
+    for (wchar_t& c : wideTitle) {
+        if (c >= L'A' && c <= L'Z') c += (L'a' - L'A');
+    }
+    for (wchar_t& c : widePattern) {
+        if (c >= L'A' && c <= L'Z') c += (L'a' - L'A');
+    }
+
+    if (widePattern.empty()) return true;
 
     size_t pos = 0;
-    while ((pos = lowerTitle.find(lowerPattern, pos)) != std::string::npos) {
+    while ((pos = wideTitle.find(widePattern, pos)) != std::wstring::npos) {
         // Check character before match
-        bool beforeOk = (pos == 0) || isDelimiter(lowerTitle[pos - 1]);
+        bool beforeOk = (pos == 0) || isDelimiter(wideTitle[pos - 1]);
 
         // Check character after match
-        size_t afterPos = pos + lowerPattern.length();
-        bool afterOk = (afterPos == lowerTitle.length()) || isDelimiter(lowerTitle[afterPos]);
+        size_t afterPos = pos + widePattern.length();
+        bool afterOk = (afterPos == wideTitle.length()) || isDelimiter(wideTitle[afterPos]);
 
         if (beforeOk && afterOk) {
             return true;
@@ -133,7 +146,7 @@ static int parseCodeTable(const std::string& valueStr) {
     if (valUpper == "UNICODE_COMPOUND" || valUpper == "COMPOUND" || valUpper == "TO_HOP" || valUpper == "3") return 3;
     if (valUpper == "VN_LOCALE_1258" || valUpper == "1258" || valUpper == "4") return 4;
 
-    return 0; // Default to Unicode if unknown
+    return -1; // Unknown value -> caller should skip this rule
 }
 
 void ProcessRuleHelper::init() {
@@ -159,8 +172,7 @@ void ProcessRuleHelper::reloadRules() {
     _ruleItems.clear();
 
     std::string line;
-    while (std::getline(inFile, line)) {
-        line = trimString(line);
+    while (std::getline(inFile, line)) {        line = trimString(line);
         if (line.empty() || line[0] == '#' || line[0] == ';') {
             continue;
         }
@@ -192,6 +204,11 @@ void ProcessRuleHelper::reloadRules() {
             }
 
             int code = parseCodeTable(rawVal);
+            if (code < 0) {
+                // Unknown code table value -> skip this malformed rule instead of
+                // silently defaulting to Unicode.
+                continue;
+            }
             AppRuleItem item;
             item.codeTable = code;
 
@@ -225,6 +242,62 @@ void ProcessRuleHelper::reloadRules() {
         }
     }
     inFile.close();
+
+    // If the INI file exists but contains no valid rules, fall back to the
+    // built-in defaults so behavior is consistent with the "file missing" case.
+    if (_ruleItems.empty()) {
+        loadDefaultRules();
+    }
+
+    // Warn (debug output) if any title-only rule exists, since such a rule
+    // applies to ALL processes and may cause unexpected code table switches.
+    for (const auto& item : _ruleItems) {
+        if (item.processName.empty() && !item.titlePattern.empty()) {
+            LOG(L"[ProcessRuleHelper] Warning: title-only rule '%s' applies to ALL processes.\n",
+                utf8ToWideString(item.titlePattern).c_str());
+            break;
+        }
+    }
+}
+
+void ProcessRuleHelper::updateIniSetting(const std::string& key, int value) {
+    if (_iniFilePath.empty()) {
+        initFilePath();
+    }
+
+    std::vector<std::string> lines;
+    bool found = false;
+    std::string lowerKey = toLower(key);
+
+    std::ifstream inFile(_iniFilePath.c_str());
+    if (inFile.is_open()) {
+        std::string line;
+        while (std::getline(inFile, line)) {
+            std::string trimmed = trimString(line);
+            size_t eqPos = trimmed.find('=');
+            if (!found && eqPos != std::string::npos) {
+                std::string lineKey = toLower(trimString(trimmed.substr(0, eqPos)));
+                if (lineKey == lowerKey) {
+                    lines.push_back(key + " = " + std::to_string(value));
+                    found = true;
+                    continue;
+                }
+            }
+            lines.push_back(line);
+        }
+        inFile.close();
+    }
+
+    if (!found) {
+        lines.push_back(key + " = " + std::to_string(value));
+    }
+
+    std::ofstream outFile(_iniFilePath.c_str(), std::ios::trunc);
+    if (!outFile.is_open()) return;
+    for (const auto& l : lines) {
+        outFile << l << "\n";
+    }
+    outFile.close();
 }
 
 int ProcessRuleHelper::getCodeTableForProcessAndTitle(const std::string& exeName, const std::string& windowTitle) {
