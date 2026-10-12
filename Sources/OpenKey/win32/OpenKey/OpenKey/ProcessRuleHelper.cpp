@@ -354,3 +354,12 @@ std::wstring ProcessRuleHelper::getCodeTableName(int code) {
     default: return L"Unicode";
     }
 }
+
+void ProcessRuleHelper::setRuleItemsForTest(const std::vector<AppRuleItem>& items,
+                                            bool autoSwitchEnabled,
+                                            bool fallbackToUnicode) {
+    _ruleItems = items;
+    _isInitialized = true; // prevent lazy init() from re-reading the INI file
+    vAutoSwitchCodeTable = autoSwitchEnabled ? 1 : 0;
+    vFallbackToUnicode = fallbackToUnicode ? 1 : 0;
+}

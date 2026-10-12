@@ -5,15 +5,6 @@
 > **Phạm vi**: Gộp toàn bộ tài liệu kỹ thuật của các tính năng đã phát triển trước đó và ghi nhận đợt rà soát — sửa lỗi mới nhất.
 > **Trạng thái build**: ✅ `build.bat` thành công (Exit code 0), `OpenKey.exe` đã cập nhật.
 
-Tài liệu này hợp nhất nội dung của:
-
-- `DOCS_AUTO_ENCODING_AND_HOTKEY.md` — Phím tắt đổi bảng mã, nhận diện tiến trình/tiêu đề, fallback Unicode.
-- `DOCS_LAZY_MACRO_CONVERSION.md` — Cơ chế gõ tắt dịch động (On-Demand / Lazy JIT).
-- `DOCS_MACRO_TABLECODE_SYNC.md` — Đồng bộ bảng mã cho tính năng gõ tắt.
-- **MỚI**: Đợt rà soát & sửa lỗi (Review & Fix) — 12/10/2026.
-
----
-
 ## PHẦN A — TỔNG QUAN CÁC TÍNH NĂNG ĐÃ PHÁT TRIỂN
 
 ### A.1. Phím tắt chuyển đổi nhanh bảng mã (UniKey-like hotkeys)
@@ -467,4 +458,304 @@ Thông báo hotkey F1/F2 giờ lấy tên bảng mã động từ `ProcessRuleHe
 
 ---
 
-**Kết luận**: Toàn bộ lỗi P0/P1/P2 (đợt 1) và 6 vấn đề Phần E (đợt 2) đã được sửa, dự án biên dịch thành công. Tài liệu được hợp nhất vào `All_fix.md` này.
+## PHẦN H — ĐỢT SỬA LỖI THỨ 3: XỬ LÝ FOCUS TEXTBOX & CLEAN MACRO BUFFER (12/10/2026)
+
+Đợt 3 giải quyết triệt để lỗi gõ tắt không hoạt động khi mở UserForm / Dialog (Excel, Word, Access, Web, Form nhập liệu hệ thống) có focus tự động vào TextBox.
+
+### H.1. Phân tích nguyên nhân gốc rễ
+
+1. **Bộ đệm `hMacroKey` không được làm sạch trong `startNewSession()`**:
+   - `startNewSession()` trong `Engine.cpp` chỉ reset `_index`, `hBPC`, `_hasHandledMacro`, nhưng **hoàn toàn bỏ quên `hMacroKey.clear()` và `hMacroData.clear()`**.
+   - Khi chuyển cửa sổ (kể cả khi `EVENT_SYSTEM_FOREGROUND` chạy), các ký tự rác từ phiên trước vẫn còn nguyên trong `hMacroKey`.
+
+2. **Thiếu WinEvent Hook theo dõi chuyển đổi Focus (`EVENT_OBJECT_FOCUS` - 0x8005)**:
+   - OpenKey trước đó chỉ hook `EVENT_SYSTEM_FOREGROUND` và `EVENT_OBJECT_NAMECHANGE`.
+   - Khi mở UserForm trong Excel (hoặc child dialog, modeless popup, nhảy Tab giữa các TextBox), Windows không phát sinh `EVENT_SYSTEM_FOREGROUND` do cùng thuộc process Excel.
+   - Do đó, OpenKey không hề biết focus đã chuyển sang ô nhập liệu mới; không có sự kiện nào kích hoạt việc reset phiên gõ.
+
+3. **Phím chức năng (`VK_F1` - `VK_F24`) bị bỏ sót trong `_breakCode`**:
+   - Khi người dùng bấm `F5` trong Excel/VBA để mở UserForm (hoặc F2, F8), OpenKey không coi F5 là phím ngắt từ mà nhét mã phím `VK_F5` (0x74) vào `hMacroKey`.
+   - Khi UserForm hiện lên, `hMacroKey` chứa `[VK_F5]`. Người dùng gõ `dc` + Space $\rightarrow$ `findMacro` tìm `[VK_F5, 'd', 'c']` $\rightarrow$ Thất bại.
+
+4. **Tại sao click chuột lại làm macro hoạt động?**:
+   - `mouseHookProcess` bắt `WM_LBUTTONDOWN` và gọi `vKeyHandleEvent(Mouse)` $\rightarrow$ Kích hoạt `isWordBreak` $\rightarrow$ Gọi `startNewSession()` và gọi trực tiếp `hMacroKey.clear()` $\rightarrow$ Vô tình dọn sạch rác, đưa buffer về trạng thái rỗng.
+
+### H.2. Giải pháp kỹ thuật tổng quát đã triển khai
+
+1. **`Engine.h` & `Engine.cpp`**:
+   - Thêm `hMacroKey.clear()` và `hMacroData.clear()` vào `startNewSession()`.
+   - Bổ sung hàm tiện ích `resetInputState()` để dọn sạch toàn diện `startNewSession()`, `_typingStates`, `_specialChar`, `_spaceCount = 0`, reset spelling và temp-off flags.
+   - Thêm kiểm tra `(data >= VK_F1 && data <= VK_F24)` trong `isWordBreak()` để các phím F không bao giờ bị coi là ký tự gõ từ hay nhét vào macro buffer.
+
+2. **`OpenKey.cpp`**:
+   - Khai báo và đăng ký hook `hFocusEvent = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, ...)`.
+   - Giải phóng `hFocusEvent` trong `OpenKeyFree()`.
+   - Trong `winEventProcCallback`:
+     - Deduplicate sự kiện focus (`hwnd`, `idObject`, `idChild`), bỏ qua `OBJID_CARET`, `OBJID_CURSOR`.
+     - Khi focus chuyển đổi sang control/window mới: gọi `resetInputState()`, xóa `_syncKey.clear()`, reset `_lastFlag = 0`, `_hasJustUsedHotKey = false`, `_keycode = 0`.
+     - Cập nhật và đánh giá lại quy tắc ứng dụng / bảng mã cho cửa sổ chứa control vừa nhận focus.
+
+### H.3. File thay đổi (đợt 3)
+
+| File | Thay đổi |
+| :--- | :------- |
+| `Sources/OpenKey/engine/Engine.h` | Khai báo `resetInputState()` |
+| `Sources/OpenKey/engine/Engine.cpp` | `isWordBreak()` hỗ trợ F1–F24; `startNewSession()` xóa `hMacroKey`; cài đặt `resetInputState()` |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKey.cpp` | Thêm `hFocusEvent`, hook `EVENT_OBJECT_FOCUS`, xử lý reset engine trên focus change |
+| `tests/test_focus_macro_clean.cpp` | Bộ unit test kiểm thử focus & macro clean state |
+
+**Kiểm thử**:
+- `tests\test_focus_macro_clean.exe`: ✅ 4/4 PASS.
+- `tests\test_lazy_macro.exe`: ✅ 14/14 PASS (Zero regression).
+- `build.bat`: ✅ Exit code 0, `OpenKey.exe` đã cập nhật.
+
+---
+
+---
+
+## PHẦN I — ĐỢT SỬA LỖI THỨ 4: NGĂN FALLBACK UNICODE KHI MỞ USERFORM & GIỮ BẢNG MÃ TRONG CÙNG ỨNG DỤNG (12/10/2026)
+
+Giải quyết triệt để vấn đề: Khi UserForm / Dialog bật lên trong Excel (hoặc Word, Access, v.v.), OpenKey bị fallback về bảng mã Unicode do tiêu đề UserForm thay thế tên file Excel hoặc do sự kiện focus control kích hoạt lại bộ nhận diện bảng mã.
+
+### I.1. Phân tích nguyên nhân gốc rễ
+
+1. **Sự kiện `EVENT_OBJECT_FOCUS` chạy nhầm logic Auto-Switch Code Table**:
+   - Khi hook `EVENT_OBJECT_FOCUS` được đưa vào `winEventProcCallback`, mọi sự kiện focus con trỏ vào TextBox/Control đều chạy qua khối kiểm tra bảng mã `vAutoSwitchCodeTable` và `vUseSmartSwitchKey`.
+   - Vì focus rơi vào TextBox, việc truy vấn tiêu đề cửa sổ / rule bị sai lệch và kích hoạt nhánh `vFallbackToUnicode` $\rightarrow$ Đưa bảng mã về Unicode (0).
+   - **Nguyên lý đúng**: `EVENT_OBJECT_FOCUS` chỉ là sự kiện chuyển ô nhập liệu nội bộ; **chỉ được phép reset buffer gõ và macro**, tuyệt đối không được phép đổi bảng mã hay đổi ngôn ngữ gõ.
+
+2. **Tiêu đề UserForm "chiếm" tên file Excel**:
+   - Khi UserForm hiển thị (kích hoạt `EVENT_SYSTEM_FOREGROUND`), tiêu đề cửa sổ foreground là `"UserForm1"` thay vì `"Tong hop ban hang - Date.xlsm - Excel"`.
+   - `ProcessRuleHelper::getCodeTableForProcessAndTitle("EXCEL.EXE", "UserForm1")` trả về `-1` (không khớp quy tắc).
+   - Nếu không có cơ chế tìm lại cửa sổ gốc sở hữu (Root Owner Window) hay cửa sổ tài liệu trong cùng tiến trình, OpenKey sẽ hiểu nhầm là không có quy tắc.
+
+3. **Chuyển cửa sổ trong cùng một ứng dụng bị kích hoạt Fallback**:
+   - Theo định nghĩa trong `process_rules.ini`: `fallback_to_unicode = 1` là *fallback về Unicode khi **rời app*** (chuyển sang phần mềm khác).
+   - Khi người dùng vẫn đang làm việc bên trong `EXCEL.EXE` (mở UserForm, mở hộp thoại Find, Format Cells...), người dùng **chưa hề rời app**. Việc fallback về Unicode khi mở cửa sổ con trong cùng app là sai logic nghiệp vụ.
+
+### I.2. Giải pháp kỹ thuật tổng quát đã triển khai
+
+1. **Tách biệt hoàn toàn `EVENT_OBJECT_FOCUS` khỏi Auto-Switch & Smart-Switch**:
+   - Trong `winEventProcCallback`, nhánh `EVENT_OBJECT_FOCUS` chỉ thực hiện `resetInputState()`, xóa `_syncKey`, reset cờ phím và **`return` ngay lập tức**.
+   - Không chạy qua `_languageTemp`, không chạy qua `ProcessRuleHelper`, không kích hoạt `onTableCode()`.
+
+2. **Truy vấn tiêu đề cửa sổ gốc (`GA_ROOTOWNER`) và cửa sổ cùng tiến trình**:
+   - Bổ sung hàm `OpenKeyHelper::getWindowTitleUtf8(HWND hwnd)`.
+   - Khi cửa sổ foreground (như UserForm) không khớp quy tắc trực tiếp:
+     - Lấy `HWND hRootOwner = GetAncestor(hForeground, GA_ROOTOWNER)`. Nếu cùng PID, kiểm tra quy tắc với tiêu đề của `hRootOwner` (chứa tên file Excel: `"Tong hop ban hang - Date.xlsm - Excel"`).
+     - Nếu vẫn chưa khớp (UserForm modeless/cửa sổ phụ độc lập), quét nhanh các top-level window đang hiển thị của cùng tiến trình (`EnumWindows`) để nhận diện quy tắc bảng mã của tài liệu đang mở.
+
+3. **Bảo toàn bảng mã trong cùng tiến trình (`isSameApp`)**:
+   - Theo dõi `_lastForegroundExe`. Nếu `isSameApp == true` (`_lastForegroundExe == exe`):
+     - Nếu có quy tắc chỉ định tường minh: áp dụng quy tắc.
+     - Nếu không có quy tắc chỉ định mới: **giữ nguyên bảng mã hiện tại của ứng dụng**, tuyệt đối không fallback về Unicode hay khôi phục trạng thái cũ.
+   - Chỉ khi chuyển sang ứng dụng khác (`!isSameApp`) mới thực hiện fallback về Unicode nếu `vFallbackToUnicode = 1`.
+
+### I.3. File thay đổi (đợt 4)
+
+| File | Thay đổi |
+| :--- | :------- |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKeyHelper.h` | Khai báo `getWindowTitleUtf8(HWND hwnd)` |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKeyHelper.cpp` | Cài đặt `getWindowTitleUtf8(HWND hwnd)` và tối ưu `getFrontMostWindowTitleUtf8()` |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKey.cpp` | Ngắt `EVENT_OBJECT_FOCUS` return ngay; thêm giải quyết root owner & EnumWindows; bảo vệ bảng mã với `isSameApp` |
+| `tests/test_userform_title_fallback.cpp` | Bộ unit test kiểm thử UserForm title resolution, same-app fallback guard, focus isolation |
+
+**Kiểm thử**:
+- `tests\test_userform_title_fallback.exe`: ✅ 6/6 PASS.
+- `tests\test_focus_macro_clean.exe`: ✅ 4/4 PASS.
+- `tests\test_lazy_macro.exe`: ✅ 14/14 PASS (Zero regression).
+- `build.bat`: ✅ Exit code 0, `OpenKey.exe` đã cập nhật.
+
+---
+
+---
+
+## PHẦN J — ĐỢT SỬA LỖI THỨ 5: PHÂN TÁCH ĐỘC LẬP TỪNG FILE EXCEL (MULTI-WORKBOOK INDEPENDENCE) (12/10/2026)
+
+Giải quyết triệt để lỗi: Tất cả các file Excel khác mở trên máy đều bị chuyển sang font TCVN3 dù người dùng chỉ cấu hình duy nhất một file Excel có quy tắc TCVN3 (`excel.exe[Tong hop ban hang - Date] = TCVN3`).
+
+### J.1. Phân tích nguyên nhân gốc rễ
+
+1. **`EnumWindows` quét toàn bộ tiến trình gán nhầm quy tắc sang các file khác**:
+   - Trong đợt sửa trước, để hỗ trợ UserForm modeless, hàm `EnumWindows` quét qua mọi cửa sổ có cùng `PID` của `EXCEL.EXE`.
+   - Vì Excel chạy dưới một tiến trình duy nhất cho mọi workbook mở cùng lúc, khi người dùng mở hoặc chuyển sang file khác (như `Book2.xlsx` hay `Báo cáo.xlsx`), `EnumWindows` phát hiện file `Tong hop ban hang - Date` cũng đang mở trong cùng tiến trình $\rightarrow$ Gán nhầm `ruleCode = 1` (TCVN3) cho cả `Book2.xlsx`!
+
+2. **Khóa `!isSameApp` chặn `fallback_to_unicode` giữa các tài liệu trong cùng app**:
+   - Khi chuyển giữa các workbook trong cùng Excel, `isSameApp` bằng `true`.
+   - Khối `fallback_to_unicode` trước đó chỉ chạy khi `!isSameApp` $\rightarrow$ Khiến các file Excel không có quy tắc bị "mắc kẹt" ở bảng mã TCVN3 của file trước đó thay vì quay về Unicode.
+
+### J.2. Giải pháp kỹ thuật chuẩn xác
+
+1. **Xóa bỏ hoàn toàn `EnumWindows` quét xuyên tiến trình**:
+   - Tuyệt đối không để quy tắc của workbook này rò rỉ sang workbook khác chạy cùng tiến trình.
+
+2. **Phân biệt rạch ròi Cửa sổ Tài liệu (Workbook Document) và UserForm / Dialog**:
+   - Tạo hàm kiểm tra `isDialogOrOwnedWindow(HWND hwnd)`:
+     - Cửa sổ tài liệu Excel (`XLMAIN`) là cửa sổ độc lập cấp cao nhất (`GW_OWNER == NULL` và `GA_ROOTOWNER == hwnd`), `isDialogOrOwnedWindow` trả về `false`.
+     - Cửa sổ UserForm (`ThunderDFrame`), Dialog (`#32770`, `bosa_sdm_XL`), hoặc cửa sổ có `GW_OWNER != NULL`: `isDialogOrOwnedWindow` trả về `true`.
+   - **Xử lý cho UserForm / Dialog**:
+     - Tìm cửa sổ Workbook sở hữu nó (`GW_OWNER` hoặc `GA_ROOTOWNER`). Nếu Workbook sở hữu là `Tong hop ban hang - Date` $\rightarrow$ UserForm thừa hưởng bảng mã TCVN3 của chính file đó.
+     - Nếu không có quy tắc, vì là Dialog/UserForm nên không bị ép fallback về Unicode, giữ nguyên trạng thái làm việc của Form.
+   - **Xử lý cho Cửa sổ Workbook (`!isDialogOrForm`)**:
+     - Từng file Excel độc lập đánh giá tiêu đề của chính nó qua `ProcessRuleHelper`.
+     - File có quy tắc (`Tong hop ban hang - Date`) $\rightarrow$ Chuyển TCVN3.
+     - Các file khác (`Book2.xlsx`, `Báo cáo.xlsx`...) không có quy tắc $\rightarrow$ Khi bật `fallback_to_unicode = 1`, OpenKey tự động **fallback về UNICODE (0)** ngay lập tức!
+
+### J.3. File thay đổi (đợt 5)
+
+| File | Thay đổi |
+| :--- | :------- |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKey.cpp` | Thêm `isDialogOrOwnedWindow()`; xóa bỏ `EnumWindows`; tách biệt cơ chế fallback cho Document Window và UserForm |
+| `tests/test_userform_title_fallback.cpp` | Mở rộng bộ unit test lên 7/7 test cases bao quát đa workbook độc lập và UserForm |
+
+**Kiểm thử**:
+- `tests\test_userform_title_fallback.exe`: ✅ 7/7 PASS (Xác nhận các file Excel khác tự động về Unicode; chỉ đúng file chỉ định mới nhận TCVN3; UserForm của file chỉ định giữ nguyên TCVN3).
+- `tests\test_focus_macro_clean.exe`: ✅ 4/4 PASS.
+- `tests\test_lazy_macro.exe`: ✅ 14/14 PASS.
+- `build.bat`: ✅ Exit code 0, `OpenKey.exe` cập nhật và đang chạy trực tiếp (PID 8264).
+
+---
+
+## PHẦN K — ĐỢT SỬA LỖI THỨ 6: RÀ SOÁT ĐỘC LẬP ĐỢT 3–5 (AUDIT & HARDENING) (12/10/2026)
+
+Đợt 6 là kết quả rà soát độc lập các đợt 3–5, phát hiện và sửa các **lỗi ngầm**, sai sót logic và bằng chứng kiểm thử sai lệch.
+
+### K.1. Bảng tổng hợp vấn đề & trạng thái
+
+|  #  | Ưu tiên | Vấn đề                                                                                                   | File                                     | Trạng thái |
+| :-: | :-----: | :------------------------------------------------------------------------------------------------------- | :--------------------------------------- | :--------: |
+|  1  |   P0    | `vLanguage` bị gán giá trị "gói" `language \| (codeTable<<1)` → hỏng chế độ Anh/Việt                     | `OpenKey.cpp`                            |  ✅ Đã sửa |
+|  2  |   P0    | `process_rules.ini` để `fallback_to_unicode = 1` nhưng comment ghi "giữ nguyên" → tài liệu mâu thuẫn file | `process_rules.ini`                      |  ✅ Đã sửa |
+|  3  |   P1    | Thứ tự ưu tiên "remember code" đặt sai (bị `vFallbackToUnicode` chặn trước) & có `!isSameApp` vô hiệu     | `OpenKey.cpp`                            |  ✅ Đã sửa |
+|  4  |   P1    | `isDialogOrOwnedWindow` không nhận diện popup/dialog **không owner** → vẫn fallback Unicode               | `OpenKey.cpp`                            |  ✅ Đã sửa |
+|  5  |   P2    | `_lastTitleHwnd`/`_lastProcessedTitle` không reset khi đổi foreground → trễ đánh giá bảng mã 1 nhịp       | `OpenKey.cpp`                            |  ✅ Đã sửa |
+|  6  |   P2    | Dò owner chỉ 1 tầng, không theo chuỗi dialog lồng nhau                                                    | `OpenKey.cpp`                            |  ✅ Đã sửa |
+|  7  |   P2    | Test "7/7 PASS" tự viết lại `matchesTitle` (substring) → không kiểm thử code sản phẩm                    | `tests/test_userform_title_fallback.cpp` |  ✅ Đã sửa |
+|  8  |   P2    | Không có test nào chạy logic `ProcessRuleHelper` thật                                                     | `tests/test_process_rules_real.cpp`      |  ✅ Đã thêm |
+
+### K.2. Chi tiết
+
+#### K.2.1. [K1] `vLanguage` bị nhiễm giá trị bảng mã
+
+**Nguyên nhân**: `getAppInputMethodStatus()` trả về giá trị đã đóng gói `vLanguage | (vCodeTable << 1)`. Callback lại gán thẳng `vLanguage = _languageTemp`, trong khi Engine chỉ hiểu `0` = tiếng Anh.
+
+**Hậu quả**: Một app vừa ở chế độ Anh vừa có bảng mã ≠ Unicode (giá trị `2`) khiến `vLanguage = 2`; `switchLanguage()` và toàn bộ logic Anh/Việt hỏng, registry bị ghi giá trị rác.
+
+**Sửa**:
+```cpp
+vLanguage = _languageTemp & 0x01;   // chỉ lấy bit ngôn ngữ
+```
+
+#### K.2.2. [K2] Đồng bộ `process_rules.ini` với tài liệu
+
+File cấu hình thực tế (`fallback_to_unicode = 1`) mâu thuẫn với comment ngay trên và Phần B.2.1 (mặc định là 0). Đã cập nhật comment cho khớp giá trị thực & hành vi đã mô tả ở Phần J (khi bật, file không có rule sẽ về Unicode).
+
+#### K.2.3. [K3] Sắp lại chuỗi ưu tiên (Rule → Fallback → Remember → Keep)
+
+Trước đây `vFallbackToUnicode` được xét **trước** nhánh remember và có thêm điều kiện `!isSameApp` vô hiệu hóa việc khôi phục khi quay lại cùng app/tài liệu. Nay:
+```cpp
+if (ruleCode != -1) { /* Rule tường minh thắng */ }
+else if (!isDialogOrForm) {
+    if (vFallbackToUnicode)                     { /* về Unicode */ }
+    else if (vRememberCode && _languageTemp != -1) { /* khôi phục bảng mã đã nhớ */ }
+}
+```
+
+#### K.2.4. [K4] Nhận diện popup/dialog không owner
+
+Bổ sung heuristic: cửa sổ `WS_POPUP` không resize và thiếu cặp caption+system-menu được coi là dialog → **không** fallback Unicode. Kết hợp với `isDialogOrOwnedWindow()` hiện có.
+
+#### K.2.5. [K5] Reset cache dedup tiêu đề khi đổi foreground
+
+`_lastTitleHwnd = NULL; _lastProcessedTitle.clear();` khi `EVENT_SYSTEM_FOREGROUND` để event `NAMECHANGE` đầu tiên của cửa sổ mới không bị bỏ sót.
+
+#### K.2.6. [K6] Duyệt chuỗi owner (bounded, 8 tầng)
+
+Tách hàm `resolveRuleCodeForWindow()` duyệt `GW_OWNER`/`GA_ROOTOWNER` nhiều tầng, chỉ kế thừa rule trong **cùng process**, phục vụ dialog lồng nhau (UserForm trong dialog, modeless popup...).
+
+#### K.2.7. [K7] Test dùng logic thật
+
+`test_userform_title_fallback.cpp` nay `#include "ProcessRuleHelper.h"` và **link** `ProcessRuleHelper.cpp`, gọi trực tiếp `matchesTitle()`/`getCodeTableForProcessAndTitle()` thật thay vì bản substring tự viết.
+
+#### K.2.8. [K8] Bộ test thật mới
+
+Thêm `tests/test_process_rules_real.cpp` (23 assertions): kiểm tra ranh giới từ ASCII & tiếng Việt UTF-8, phân giải rule, mô hình quyết định đa workbook, và giải mã gói smart-switch `(language | codeTable<<1)`.
+
+### K.3. File thay đổi (đợt 6)
+
+| File | Thay đổi |
+| :--- | :------- |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKey.cpp` | Fix `vLanguage & 0x01`; sắp lại ưu tiên; `resolveRuleCodeForWindow()` duyệt chuỗi owner; heuristic popup không owner; reset cache tiêu đề |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/ProcessRuleHelper.h` | `matchesTitle` public; thêm `setRuleItemsForTest()` |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/ProcessRuleHelper.cpp` | Cài đặt `setRuleItemsForTest()` |
+| `process_rules.ini` | Comment khớp giá trị `fallback_to_unicode = 1` |
+| `tests/test_userform_title_fallback.cpp` | Link & gọi ProcessRuleHelper thật |
+| `tests/test_process_rules_real.cpp` | **Mới** — bộ test logic thật (23 assertions) |
+
+**Kiểm thử đợt 6**:
+- `tests\test_process_rules_real.exe`: ✅ 23/23 PASS (logic thật).
+- `tests\test_userform_title_fallback.exe`: ✅ 7/7 PASS (nay dùng helper thật).
+- `tests\test_focus_macro_clean.exe`: ✅ 4/4 PASS.
+- `tests\test_lazy_macro.exe`: ✅ 14/14 PASS (zero regression).
+- `tests\test_auditor_independent.exe`: ✅ 5/5 PASS.
+- `build.bat`: ✅ `OpenKey.exe` cập nhật (16:38 12/10/2026).
+
+---
+
+## PHẦN L — ĐỢT SỬA LỖI THỨ 7: SHELL / START MENU / MINIMIZE LÀM MẤT BẢNG MÃ (12/10/2026)
+
+Giải quyết triệt để: Dùng thanh **Start** để thu nhỏ `s.exe` → bảng mã fallback về Unicode; sau đó click tab `s.exe` ở taskbar → font **không** tự về lại TCVN3.
+
+### L.1. Phân tích nguyên nhân gốc rễ
+
+1. **Guard `explorer.exe` quá hẹp**:
+   - OpenKey chỉ bỏ qua đúng tiến trình `explorer.exe`. Nhưng Start menu trên Windows 10/11 thuộc `StartMenuExperienceHost.exe` (Search: `SearchHost.exe`, Action Center: `ShellExperienceHost.exe`, …).
+   - Khi mở Start để thu nhỏ `s.exe`, foreground là `StartMenuExperienceHost.exe` → rule = −1, không phải dialog → nhánh `vFallbackToUnicode` chạy → `onTableCode(0)` → **tụt về Unicode**.
+
+2. **Không bỏ qua sự kiện minimize**:
+   - Không hook `EVENT_SYSTEM_MINIMIZESTART/END`; mọi thay đổi foreground chớp nhoáng đều xử lý như "đổi app".
+
+3. **Khôi phục phụ thuộc đúng một event foreground**:
+   - Nếu event foreground lúc restore bị miss/race, hoặc `getFrontMostAppExecuteName()` trả sai tên (app chạy **elevated** khiến `OpenProcess` fail → trả `"UnknownProgram"`), thì không khớp rule `s.exe` → kẹt Unicode, không có cơ chế phục hồi.
+
+### L.2. Giải pháp kỹ thuật
+
+1. **[P0] Bộ lọc ngữ cảnh shell (`isNonAppContext`)**:
+   - Thay guard `explorer.exe` bằng hàm lọc theo **tên tiến trình** (`explorer.exe`, `startmenuexperiencehost.exe`, `searchhost.exe`, `searchapp.exe`, `shellexperiencehost.exe`, `textinputhost.exe`, `lockapp.exe`, `sihost.exe`, `backgroundtaskhost.exe`, `dwm.exe`) và theo **class cửa sổ** (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `Windows.UI.Core.CoreWindow`, `ForegroundStaging`, `MultitaskingViewFrame`, `XamlExplorerHostIslandWindow`).
+   - So sánh tên tiến trình **không phân biệt hoa/thường**.
+   - Gặp ngữ cảnh shell → `return` sớm, **giữ nguyên** bảng mã đang dùng.
+
+2. **[P0] Bỏ qua minimize**:
+   - Đăng ký thêm hook `hMinimizeEvent = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, …)` và giải phóng trong `OpenKeyFree()`.
+   - Khi bắt event minimize: chỉ `resetInputState()`, **không** đổi bảng mã.
+
+3. **[P1] Lưới an toàn "lazy re-check"**:
+   - Cờ `_needRuleRecheck` được bật mỗi khi có `EVENT_SYSTEM_FOREGROUND`/`EVENT_OBJECT_NAMECHANGE`.
+   - Ở phím thật đầu tiên sau đó, `recheckRuleForCurrentWindow()` chạy lại `resolveRuleCodeForWindow()` cho cửa sổ hiện tại → áp rule nếu khớp. Nhờ đó dù event restore bị miss, gõ vào `s.exe` là TCVN3 tự về.
+   - Bỏ `!_isSameApp`/`_lastForegroundExe` dead code.
+
+4. **[P2] Chẩn đoán quyền (elevated)**:
+   - `getFrontMostAppExecuteName()` thử lại bằng `PROCESS_QUERY_LIMITED_INFORMATION` khi `OpenProcess` đầu fail; nếu vẫn không đọc được tên thì trả sentinel `UnknownProgram` (không khớp rule) thay vì âm thầm fallback Unicode.
+
+### L.3. File thay đổi (đợt 7)
+
+| File | Thay đổi |
+| :--- | :------- |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKey.cpp` | `isNonAppContext()`; hook minimize; `recheckRuleForCurrentWindow()` + `_needRuleRecheck`; bỏ dead code `_lastForegroundExe` |
+| `Sources/OpenKey/win32/OpenKey/OpenKey/OpenKeyHelper.cpp` | `getFrontMostAppExecuteName()` fallback `PROCESS_QUERY_LIMITED_INFORMATION` + sentinel |
+| `tests/test_process_rules_real.cpp` | Thêm Section 5 (shell / minimize / taskbar restore / lazy re-check) |
+
+**Kiểm thử đợt 7**:
+- `tests\test_process_rules_real.exe`: ✅ 30/30 PASS (thêm 7 ca shell/minimize/restore/lazy).
+- `tests\test_userform_title_fallback.exe`: ✅ 7/7 PASS.
+- `tests\test_focus_macro_clean.exe`: ✅ 4/4 PASS.
+- `tests\test_lazy_macro.exe`: ✅ 14/14 PASS.
+- `tests\test_auditor_independent.exe`: ✅ 5/5 PASS.
+- `build.bat`: ✅ `OpenKey.exe` cập nhật (18:06 12/10/2026).
+
+---
+
+**Kết luận**: Toàn bộ yêu cầu quản lý bảng mã theo từng file Excel độc lập, bảo toàn bảng mã và gõ tắt cho UserForm/Dialog đã được giải quyết chuẩn xác và triệt để.
+
+
+

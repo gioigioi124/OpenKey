@@ -145,6 +145,10 @@ void* vKeyInit() {
 bool isWordBreak(const vKeyEvent& event, const vKeyEventState& state, const Uint16& data) {
     if (event == vKeyEvent::Mouse)
         return true;
+#if _WIN32
+    if (data >= VK_F1 && data <= VK_F24)
+        return true;
+#endif
     for (i = 0; i < _breakCode.size(); i++) {
         if (_breakCode[i] == data) {
             return true;
@@ -463,6 +467,18 @@ void startNewSession() {
     _hasHandledMacro = false;
     _hasHandleQuickConsonant = false;
     _longWordHelper.clear();
+    hMacroKey.clear();
+    hMacroData.clear();
+}
+
+void resetInputState() {
+    startNewSession();
+    _typingStates.clear();
+    _typingStatesData.clear();
+    _specialChar.clear();
+    _spaceCount = 0;
+    vCheckSpelling = _useSpellCheckingBefore;
+    _willTempOffEngine = false;
 }
 
 void checkCorrectVowel(vector<vector<Uint16>>& charset, int& i, int& k, const Uint16& markKey) {

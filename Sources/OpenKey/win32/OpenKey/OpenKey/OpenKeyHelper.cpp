@@ -129,10 +129,21 @@ string& OpenKeyHelper::getFrontMostAppExecuteName() {
 	}
 	_cacheProcessId = _tempProcessId;
 	_proc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, _tempProcessId);
-	GetProcessImageFileName((HMODULE)_proc, _exePath, 1024);
-	CloseHandle(_proc);
-	
+	if (_proc == NULL) {
+		// Typically an elevated process while OpenKey runs unelevated: retry with
+		// the least-privilege query right, which is often still granted.
+		_proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, _tempProcessId);
+	}
+	_exePath[0] = 0;
+	if (_proc != NULL) {
+		GetProcessImageFileName((HMODULE)_proc, _exePath, 1024);
+		CloseHandle(_proc);
+	}
+
 	if (wcscmp(_exePath, _T("")) == 0) {
+		// Cannot determine the process name. Use a sentinel that can never match
+		// a rule, so an elevated/unknown app does not wrongly trigger a code
+		// table switch (previously this could silently fall back to Unicode).
 		return _unknownProgram;
 	}
 	_exeName = _tcsrchr(_exePath, '\\') + 1;
@@ -155,17 +166,20 @@ string & OpenKeyHelper::getLastAppExecuteName() {
 	return _exeNameUtf8;
 }
 
-string OpenKeyHelper::getFrontMostWindowTitleUtf8() {
-	HWND hForeground = GetForegroundWindow();
-	if (!hForeground) return "";
+string OpenKeyHelper::getWindowTitleUtf8(HWND hwnd) {
+	if (!hwnd) return "";
 	WCHAR titleBuf[1024] = { 0 };
-	int len = GetWindowTextW(hForeground, titleBuf, 1024);
+	int len = GetWindowTextW(hwnd, titleBuf, 1024);
 	if (len <= 0) return "";
 	int size_needed = WideCharToMultiByte(CP_UTF8, 0, titleBuf, len, NULL, 0, NULL, NULL);
 	if (size_needed <= 0) return "";
 	std::string strTo(size_needed, 0);
 	WideCharToMultiByte(CP_UTF8, 0, titleBuf, len, &strTo[0], size_needed, NULL, NULL);
 	return strTo;
+}
+
+string OpenKeyHelper::getFrontMostWindowTitleUtf8() {
+	return getWindowTitleUtf8(GetForegroundWindow());
 }
 
 wstring OpenKeyHelper::getFullPath() {

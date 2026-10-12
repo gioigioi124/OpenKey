@@ -13,6 +13,7 @@ redistribute your new version, it MUST be open source.
 -----------------------------------------------------------*/
 #include "stdafx.h"
 #include "AppDelegate.h"
+#include <algorithm>
 
 #pragma comment(lib, "imm32")
 #define IMC_GETOPENSTATUS 0x0005
@@ -42,6 +43,8 @@ static HHOOK hKeyboardHook;
 static HHOOK hMouseHook;
 static HWINEVENTHOOK hSystemEvent;
 static HWINEVENTHOOK hTitleEvent;
+static HWINEVENTHOOK hFocusEvent;
+static HWINEVENTHOOK hMinimizeEvent;
 static KBDLLHOOKSTRUCT* keyboardData;
 static MSLLHOOKSTRUCT* mouseData;
 static vKeyHookState* pData;
@@ -64,13 +67,30 @@ static int _languageTemp = 0; //use for smart switch key
 static vector<Byte> savedSmartSwitchKeyData; ////use for smart switch key
 
 static bool _hasJustUsedHotKey = false;
+static bool _needRuleRecheck = false; // lazy code-table re-check on next keystroke
 
 static INPUT backspaceEvent[2];
 static INPUT keyEvent[2];
 
-LRESULT CALLBACK keyboardHookProcess(int nCode, WPARAM wParam, LPARAM lParam);
-LRESULT CALLBACK mouseHookProcess(int nCode, WPARAM wParam, LPARAM lParam);
+static LRESULT CALLBACK keyboardHookProcess(int nCode, WPARAM wParam, LPARAM lParam);
+static LRESULT CALLBACK mouseHookProcess(int nCode, WPARAM wParam, LPARAM lParam);
 VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
+
+// Resolve the rule code table for a window (walking up the owner chain for
+// dialogs / UserForms / owned windows). Returns -1 when no rule matches.
+// Implemented later in this file, after isDialogOrOwnedWindow().
+static int resolveRuleCodeForWindow(const string& exe, HWND hwnd);
+
+// True for shell / transient windows (Start menu, taskbar, desktop, search...)
+// that must NOT trigger any code-table change.
+// Implemented later in this file.
+static bool isNonAppContext(const string& exe, HWND hwnd);
+
+// Re-evaluate the code table rule for the currently focused window. Used as a
+// lazy safety net so a missed foreground event cannot leave the code table
+// stuck. Implemented later in this file.
+static void recheckRuleForCurrentWindow();
+
 
 void OpenKeyFree() {
 	UnhookWindowsHookEx(hMouseHook);
@@ -79,6 +99,14 @@ void OpenKeyFree() {
 	if (hTitleEvent) {
 		UnhookWinEvent(hTitleEvent);
 		hTitleEvent = NULL;
+	}
+	if (hFocusEvent) {
+		UnhookWinEvent(hFocusEvent);
+		hFocusEvent = NULL;
+	}
+	if (hMinimizeEvent) {
+		UnhookWinEvent(hMinimizeEvent);
+		hMinimizeEvent = NULL;
 	}
 }
 
@@ -178,6 +206,8 @@ void OpenKeyInit() {
 	hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseHookProcess, hInstance, 0);
 	hSystemEvent = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 	hTitleEvent = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+	hFocusEvent = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+	hMinimizeEvent = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, NULL, winEventProcCallback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 }
 
 void saveSmartSwitchKeyData() {
@@ -526,6 +556,15 @@ LRESULT CALLBACK keyboardHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (!_isFlagKey && wParam != WM_KEYUP && wParam != WM_SYSKEYUP)
 		_keycode = (Uint16)keyboardData->vkCode;
 
+	// Lazy safety net: if the foreground changed but the code table was not
+	// (re)evaluated (missed/raced foreground event), re-check it on the next
+	// real keystroke. Restoring an app from the taskbar therefore recovers its
+	// code table even if no foreground event reached us.
+	if (_needRuleRecheck && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
+		_needRuleRecheck = false;
+		recheckRuleForCurrentWindow();
+	}
+
 	//switch language shortcut; convert hotkey
 	if ((wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) && !_isFlagKey && _keycode != 0) {
 		// Hotkeys: Ctrl + Shift + F1 (Unicode), Ctrl + Shift + F2 (TCVN3), Ctrl + Shift + F12 (lock)
@@ -718,6 +757,152 @@ LRESULT CALLBACK mouseHookProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 	return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
 }
 
+static bool isDialogOrOwnedWindow(HWND hwnd) {
+	if (!hwnd) return false;
+	HWND hOwner = GetWindow(hwnd, GW_OWNER);
+	if (hOwner != NULL && hOwner != hwnd)
+		return true;
+
+	WCHAR className[128] = { 0 };
+	if (GetClassNameW(hwnd, className, 128) > 0) {
+		if (_wcsicmp(className, L"ThunderDFrame") == 0) return true;
+		if (_wcsicmp(className, L"#32770") == 0) return true;
+		if (_wcsicmp(className, L"bosa_sdm_XL") == 0) return true;
+		if (_wcsicmp(className, L"bosa_sdm_Mso96") == 0) return true;
+	}
+
+	// Root owner differs from self -> it is a child/owned top-level window.
+	HWND hRootOwner = GetAncestor(hwnd, GA_ROOTOWNER);
+	if (hRootOwner != NULL && hRootOwner != hwnd)
+		return true;
+
+	// Heuristic for owner-less popup windows (dialogs shown without an owner by
+	// some toolkits, messaging forms, plugins...). A real document window is
+	// resizable and has both a caption and a system menu; an owner-less popup
+	// dialog is not resizable and lacks the caption+system-menu pair.
+	LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+	bool isResizable = (style & WS_THICKFRAME) != 0;
+	bool hasCaption = (style & WS_CAPTION) == WS_CAPTION;
+	bool hasSysMenu = (style & WS_SYSMENU) != 0;
+	if ((style & WS_POPUP) && !isResizable && !(hasCaption && hasSysMenu)) {
+		return true;
+	}
+	return false;
+}
+
+// Walk up the owner/ancestor chain so that a UserForm / dialog / owned popup
+// inherits the code table rule of the workbook/document window that owns it.
+static int resolveRuleCodeForWindow(const string& exe, HWND hwnd) {
+	if (!hwnd) return -1;
+
+	// Direct rule on the window itself (title may be e.g. "Tong hop ban hang - Date.xlsm - Excel").
+	string title = OpenKeyHelper::getWindowTitleUtf8(hwnd);
+	int ruleCode = -1;
+	if (!title.empty()) {
+		ruleCode = ProcessRuleHelper::getCodeTableForProcessAndTitle(exe, title);
+		if (ruleCode != -1) return ruleCode;
+	}
+
+	// Not a dialog / owned window -> nothing else to inherit from.
+	if (!isDialogOrOwnedWindow(hwnd)) return -1;
+
+	// Walk the owner / root-owner chain (bounded) looking for a matching rule.
+	DWORD selfPid = 0;
+	GetWindowThreadProcessId(hwnd, &selfPid);
+	HWND cur = hwnd;
+	for (int depth = 0; depth < 8; ++depth) {
+		HWND next = GetWindow(cur, GW_OWNER);
+		if (!next) {
+			HWND root = GetAncestor(cur, GA_ROOTOWNER);
+			if (root && root != cur) next = root;
+		}
+		if (!next || next == cur) break;
+		cur = next;
+
+		DWORD pid = 0;
+		GetWindowThreadProcessId(cur, &pid);
+		if (pid != selfPid) break; // do not inherit across processes
+
+		string ownerTitle = OpenKeyHelper::getWindowTitleUtf8(cur);
+		if (ownerTitle.empty()) continue;
+		int code = ProcessRuleHelper::getCodeTableForProcessAndTitle(exe, ownerTitle);
+		if (code != -1) return code;
+	}
+	return -1;
+}
+
+// Shell / system / transient windows must never change the code table.
+// Windows ships the Start menu, taskbar, desktop, search, action center, IME
+// host... as separate executables/windows, so the single explorer.exe guard is
+// not enough: touching the Start menu (e.g. to minimize an app) would otherwise
+// be treated as "switched to another app without a rule" and force a Unicode
+// fallback, and clicking the app's taskbar tab would not switch back.
+static bool isNonAppContext(const string& exeName, HWND hwnd) {
+	// The exe name preserves the on-disk casing, so lower-case a copy first.
+	string exe = exeName;
+	for (char& c : exe) {
+		if (c >= 'A' && c <= 'Z') c += ('a' - 'A');
+	}
+
+	// Process-name based filter (exeName is already ASCII-lowercased).
+	static const char* shellExes[] = {
+		"explorer.exe",
+		"startmenuexperiencehost.exe",
+		"searchhost.exe",
+		"searchapp.exe",
+		"shellexperiencehost.exe",
+		"textinputhost.exe",
+		"lockapp.exe",
+		"sihost.exe",
+		"backgroundtaskhost.exe",
+		"dwm.exe",
+	};
+	for (const char* name : shellExes) {
+		if (exe == name) return true;
+	}
+
+	// Window-class based filter (Start, taskbar, desktop background...).
+	if (hwnd) {
+		WCHAR cls[128] = { 0 };
+		if (GetClassNameW(hwnd, cls, 128) > 0) {
+			static const wchar_t* shellClasses[] = {
+				L"Shell_TrayWnd",
+				L"Shell_SecondaryTrayWnd",
+				L"Progman",
+				L"WorkerW",
+				L"Windows.UI.Core.CoreWindow",
+				L"ForegroundStaging",
+				L"MultitaskingViewFrame",
+				L"XamlExplorerHostIslandWindow",
+			};
+			for (const wchar_t* c : shellClasses) {
+				if (_wcsicmp(cls, c) == 0) return true;
+			}
+		}
+	}
+	return false;
+}
+
+// Lazy safety net: re-evaluate the rule of the focused window. Called on the
+// first keystroke after a foreground change so a missed/raced foreground event
+// cannot leave the code table stuck.
+static void recheckRuleForCurrentWindow() {
+	if (!vAutoSwitchCodeTable) return;
+
+	HWND hForeground = GetForegroundWindow();
+	if (!hForeground) return;
+
+	string& currentExe = OpenKeyHelper::getFrontMostAppExecuteName();
+	if (isNonAppContext(currentExe, hForeground)) return;
+
+	int ruleCode = resolveRuleCodeForWindow(currentExe, hForeground);
+	if (ruleCode != -1 && vCodeTable != ruleCode) {
+		AppDelegate::getInstance()->onTableCode(ruleCode);
+		SystemTrayHelper::updateData();
+	}
+}
+
+
 VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
 	// Throttle EVENT_OBJECT_NAMECHANGE: window titles change very frequently
 	// (browsers, editors, clocks...). Only re-evaluate when the title actually
@@ -726,6 +911,10 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 	static DWORD _lastTitleEventTime = 0;
 	static string _lastProcessedTitle = "";
 	static HWND _lastTitleHwnd = NULL;
+
+	static HWND _lastFocusHwnd = NULL;
+	static LONG _lastFocusObj = 0;
+	static LONG _lastFocusChild = 0;
 
 	if (dwEvent == EVENT_OBJECT_NAMECHANGE) {
 		if (idObject != OBJID_WINDOW || hwnd != GetForegroundWindow())
@@ -741,15 +930,65 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 			return;
 		_lastTitleHwnd = hwnd;
 		_lastProcessedTitle = currentTitle;
+	} else if (dwEvent == EVENT_OBJECT_FOCUS) {
+		// Ignore caret/cursor events
+		if (idObject == OBJID_CARET || idObject == OBJID_CURSOR)
+			return;
+
+		// Deduplicate: ignore if the exact same control/object already has focus
+		if (hwnd == _lastFocusHwnd && idObject == _lastFocusObj && idChild == _lastFocusChild)
+			return;
+
+		_lastFocusHwnd = hwnd;
+		_lastFocusObj = idObject;
+		_lastFocusChild = idChild;
+
+		// Focus changes between controls/textboxes:
+		// Reset input engine and macro buffers so typing in the new control starts fresh.
+		// DO NOT re-evaluate code table or language switches on control focus!
+		resetInputState();
+		_syncKey.clear();
+		_lastFlag = 0;
+		_hasJustUsedHotKey = false;
+		_keycode = 0;
+		return;
+	} else if (dwEvent == EVENT_SYSTEM_FOREGROUND) {
+		_lastFocusHwnd = hwnd;
+		_lastFocusObj = idObject;
+		_lastFocusChild = idChild;
+
+		// A new foreground window owns the title now: invalidate the title-dedup
+		// cache so the first EVENT_OBJECT_NAMECHANGE for this window is not
+		// wrongly skipped (would otherwise delay the code-table evaluation).
+		_lastTitleHwnd = NULL;
+		_lastProcessedTitle.clear();
+	} else if (dwEvent == EVENT_SYSTEM_MINIMIZESTART || dwEvent == EVENT_SYSTEM_MINIMIZEEND) {
+		// Minimizing/restoring must never change the code table (the window is
+		// still the same document). Only reset the typing session.
+		resetInputState();
+		_syncKey.clear();
+		_lastFlag = 0;
+		_hasJustUsedHotKey = false;
+		_keycode = 0;
+		return;
 	}
 
 	string& exe = OpenKeyHelper::getFrontMostAppExecuteName();
-	if (exe.compare("explorer.exe") == 0) //dont apply with windows explorer
+
+	// Arm the lazy re-check for any context change (even shell ones): the next
+	// keystroke in a real app then recovers its code table deterministically.
+	if (dwEvent == EVENT_SYSTEM_FOREGROUND || dwEvent == EVENT_OBJECT_NAMECHANGE) {
+		_needRuleRecheck = true;
+	}
+
+	// Shell / Start menu / taskbar / desktop / search ... must not change the
+	// code table. Keep whatever the active application is using.
+	if (isNonAppContext(exe, hwnd))
 		return;
 
-	// Read the remembered input-method status for this app once (used by both
-	// the language smart-switch and the "remember table code" feature).
-	// -1 means this app has no remembered status yet.
+	// Read the remembered input-method status (language + code table packed) for
+	// this app once, used by both the language smart-switch and the
+	// "remember table code" feature. -1 means this app has no remembered status.
 	if (dwEvent == EVENT_SYSTEM_FOREGROUND && vUseSmartSwitchKey) {
 		_languageTemp = getAppInputMethodStatus(exe, vLanguage | (vCodeTable << 1));
 	} else {
@@ -758,30 +997,43 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 
 	// 1. Process & Title recognition rule (only active when not locked)
 	if (vAutoSwitchCodeTable) {
-		string title = OpenKeyHelper::getFrontMostWindowTitleUtf8();
-		int ruleCode = ProcessRuleHelper::getCodeTableForProcessAndTitle(exe, title);
+		HWND hForeground = GetForegroundWindow();
+		bool isDialogOrForm = isDialogOrOwnedWindow(hForeground);
+
+		// Resolve the rule for the foreground window, walking the owner chain so
+		// that dialogs / UserForms / owned popups inherit the rule of the
+		// workbook/document window that owns them.
+		int ruleCode = resolveRuleCodeForWindow(exe, hForeground);
+
 		if (ruleCode != -1) {
-			// Explicit rule wins.
+			// Explicit rule matched (directly or inherited from the owner).
 			if (vCodeTable != ruleCode) {
 				AppDelegate::getInstance()->onTableCode(ruleCode);
 				SystemTrayHelper::updateData();
 			}
-		} else if (vRememberCode && _languageTemp != -1) {
-			// No rule: restore the code table previously remembered for this app
-			// (unifies Auto-Switch with the Smart-Switch-Key "remember table code"
-			// feature, matching the macOS behavior).
+		} else if (!isDialogOrForm) {
+			// No rule matched for a *document* window.
+			// Documented priority chain:
+			//   Explicit rule -> Fallback to Unicode -> Remembered code -> Keep.
+			// A dialog / UserForm without its own rule keeps the current code
+			// table of the active document (it must never force a fallback).
 			int rememberedCode = (_languageTemp >> 1);
-			if (vCodeTable != rememberedCode) {
-				AppDelegate::getInstance()->onTableCode(rememberedCode);
-				SystemTrayHelper::updateData();
-			}
-		} else if (vFallbackToUnicode) {
-			if (vCodeTable != 0) {
-				AppDelegate::getInstance()->onTableCode(0);
-				SystemTrayHelper::updateData();
+			if (vFallbackToUnicode) {
+				if (vCodeTable != 0) {
+					AppDelegate::getInstance()->onTableCode(0);
+					SystemTrayHelper::updateData();
+				}
+			} else if (vRememberCode && _languageTemp != -1) {
+				// Restore the code table the user last used inside this app
+				// (applies both across apps and between documents of one app,
+				// e.g. two Excel workbooks).
+				if (vCodeTable != rememberedCode) {
+					AppDelegate::getInstance()->onTableCode(rememberedCode);
+					SystemTrayHelper::updateData();
+				}
 			}
 		}
-		// If no rule, no remembered code and !vFallbackToUnicode -> retain current encoding.
+		// A dialog / UserForm with no rule: keep the current code table.
 	}
 
 	// 2. Smart switch key (for Vietnamese/English language toggle only)
@@ -789,7 +1041,10 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 		vTempOffEngine(false);
 		if ((_languageTemp & 0x01) != vLanguage) {
 			if (_languageTemp != -1) {
-				vLanguage = _languageTemp;
+				// _languageTemp packs (language | (codeTable << 1)); extract ONLY
+				// the language bit, otherwise vLanguage gets poisoned with the
+				// code table value and the English/Vietnamese mode breaks.
+				vLanguage = _languageTemp & 0x01;
 				AppDelegate::getInstance()->onInputMethodChangedFromHotKey();
 			} else {
 				saveSmartSwitchKeyData();
@@ -798,7 +1053,15 @@ VOID CALLBACK winEventProcCallback(HWINEVENTHOOK hWinEventHook, DWORD dwEvent, H
 	}
 
 	if (dwEvent == EVENT_SYSTEM_FOREGROUND) {
-		startNewSession();
+		resetInputState();
+		_syncKey.clear();
+		_lastFlag = 0;
+		_hasJustUsedHotKey = false;
+		_keycode = 0;
+
+		// Allow the lazy re-check to recover the rule for this window on the
+		// next keystroke in case anything above did not settle the code table.
+		_needRuleRecheck = true;
 
 		if (vSupportMetroApp && exe.compare("ApplicationFrameHost.exe") == 0) {//Metro App
 			SendMessage(HWND_BROADCAST, WM_CHAR, VK_BACK, 0L);

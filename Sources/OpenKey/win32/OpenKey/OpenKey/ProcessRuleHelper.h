@@ -20,7 +20,6 @@ private:
 
     static std::string toLower(const std::string& str);
     static bool isDelimiter(wchar_t c);
-    static bool matchesTitle(const std::string& title, const std::string& pattern);
     static void initFilePath();
     static void loadDefaultRules();
     static void createDefaultIniFile();
@@ -32,4 +31,13 @@ public:
     static int getCodeTableForProcessAndTitle(const std::string& exeName, const std::string& windowTitle);
     static int getCodeTableForProcess(const std::string& exeName);
     static std::wstring getCodeTableName(int code);
+
+    // Word-boundary title matcher (public so unit tests exercise the REAL logic,
+    // not a re-implementation).
+    static bool matchesTitle(const std::string& title, const std::string& pattern);
+
+    // Unit-test hook: inject rule items directly without touching the INI file.
+    static void setRuleItemsForTest(const std::vector<AppRuleItem>& items,
+                                    bool autoSwitchEnabled,
+                                    bool fallbackToUnicode);
 };

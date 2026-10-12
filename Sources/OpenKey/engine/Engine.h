@@ -217,6 +217,11 @@ void vKeyHandleEvent(const vKeyEvent& event,
 void startNewSession();
 
 /**
+ * Reset all input engine buffers and session state across window/focus changes
+ */
+void resetInputState();
+
+/**
  * do some task in english mode (use for macro)
  */
 void vEnglishMode(const vKeyEventState& state, const Uint16& data, const bool& isCaps, const bool& otherControlKey);
